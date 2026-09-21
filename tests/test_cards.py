@@ -90,3 +90,12 @@ def test_recover_stale(db, cfg):
     cards.lock_card(db, cfg, iid, 'dead', 2_000_000)
     assert cards.recover_stale(db, cfg) == [(iid, 'open')]
     assert dbm.get_issue(db, iid)['redispatch'] == 1
+
+
+def test_next_ready_at(db, cfg):
+    assert cards.next_ready_at(db, cfg, 1_000_000) is None
+    dbm.insert_event(db, ev('om_0', 1_000_000))
+    (iid,) = cards.assign_cards(db, cfg, 1_000_000)
+    assert cards.next_ready_at(db, cfg, 1_000_000) == 1_030_000     # 最后一条消息 + 30 秒
+    dbm.update_issue(db, iid, defer_until=1_500_000)
+    assert cards.next_ready_at(db, cfg, 1_000_000) == 1_500_000     # defer 更晚就听 defer

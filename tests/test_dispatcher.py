@@ -96,12 +96,13 @@ def test_watchdog_alerts_on_stale_listener(dcfg, monkeypatch):
 
 
 def test_quiet_window_skips_recent_message(dcfg):
+    # max_wait_sec=0:不等静默窗,直接交给 timer(等待行为另有用例)
     conn = dbm.connect(dcfg.paths.db_file)
     dbm.insert_event(conn, EventRow(message_id='om_x', chat_id='oc_group1', chat_type='group',
                                     create_time=dbm.now_ms(), sender_id='ou_a', sender_type='user',
                                     msg_type='text', text='刚发的', mentions=ME, mentions_me=True))
     conn.close()
-    assert dispatcher.run_once(dcfg, client=FakeClient()) == 0
+    assert dispatcher.run_once(dcfg, client=FakeClient(), max_wait_sec=0) == 0
 
 
 def test_threshold_rotate(dcfg):
@@ -113,3 +114,25 @@ def test_threshold_rotate(dcfg):
     conn = dbm.connect(dcfg.paths.db_file)
     assert dbm.session_get(conn)['prev_id'] == first
     assert any('上下文' in t for t in c.texts)
+
+
+def test_waits_out_quiet_window_instead_of_exiting(dcfg, monkeypatch):
+    """消息刚到就被唤起时,只差静默窗应该等,不能空转退出等 timer 再来。"""
+    conn = dbm.connect(dcfg.paths.db_file)
+    dbm.insert_event(conn, EventRow(message_id='om_now', chat_id='oc_group1', chat_type='group',
+                                    create_time=dbm.now_ms(), sender_id='ou_a', sender_type='user',
+                                    msg_type='text', text='刚发的', mentions=ME, mentions_me=True))
+    conn.close()
+    slept = []
+    monkeypatch.setattr(dispatcher.time, 'sleep', lambda s: (slept.append(s), dcfg.__setattr__('quiet_seconds', 0)))
+    assert dispatcher.run_once(dcfg, client=FakeClient(), max_cards=2) == 1
+    assert slept and slept[0] > 20            # 等了将近 30 秒的静默窗
+
+
+def test_does_not_wait_for_far_future_card(dcfg):
+    conn = dbm.connect(dcfg.paths.db_file)
+    dbm.insert_event(conn, EventRow(message_id='om_now', chat_id='oc_group1', chat_type='group',
+                                    create_time=dbm.now_ms(), sender_id='ou_a', sender_type='user',
+                                    msg_type='text', text='x', mentions=ME, mentions_me=True))
+    conn.close()
+    assert dispatcher.run_once(dcfg, client=FakeClient(), max_wait_sec=1) == 0   # 超过上限就交给 timer

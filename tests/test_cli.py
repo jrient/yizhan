@@ -50,6 +50,53 @@ def test_init_from_dir_brings_reference(inst_env, tmp_path):
     (old / 'reference' / 'incidents.md').write_text('事故记录')
     (old / 'SKILL.md').write_text('旧流程')
     cli.main(['init', 'i2', '--project', str(proj), '--from-dir', str(old)])
-    ref = Paths('i2').workspace / '.claude' / 'skills' / 'feedback-group-reply' / 'reference'
+    ref = Paths('i2').workspace / '.claude' / 'skills' / 'i2-feedback-group-reply' / 'reference'
     assert (ref / 'incidents.md').read_text() == '事故记录'
     assert (ref / 'legacy-skill.md').read_text() == '旧流程'
+
+
+def _mk_repo_skill(tmp_path, monkeypatch, inst='demo', skill=None, body='仓库版'):
+    skill = skill or cli.default_skill_name(inst)
+    repo_skills = tmp_path / 'repo_skills'
+    d = repo_skills / skill
+    d.mkdir(parents=True)
+    (d / 'SKILL.md').write_text(body)
+    monkeypatch.setattr(cli, 'REPO_SKILLS', repo_skills)
+    return d
+
+
+def test_init_copies_repo_skill_not_symlink(inst_env, tmp_path, monkeypatch):
+    _mk_repo_skill(tmp_path, monkeypatch, inst='inst9')
+    proj = tmp_path / 'p9'; proj.mkdir()
+    cli.main(['init', 'inst9', '--project', str(proj)])
+    ws = Paths('inst9').workspace / '.claude' / 'skills' / 'inst9-feedback-group-reply'
+    assert not ws.is_symlink()                       # 要真副本,不要软链
+    assert (ws / 'SKILL.md').read_text() == '仓库版'
+    # 改工作台那份不影响仓库那份
+    (ws / 'SKILL.md').write_text('机器人改过')
+    assert (tmp_path / 'repo_skills' / 'inst9-feedback-group-reply' / 'SKILL.md').read_text() == '仓库版'
+
+
+def test_sync_skill_both_directions(cfg, tmp_path, monkeypatch, capsys):
+    repo = _mk_repo_skill(tmp_path, monkeypatch, skill=cfg.skill)
+    ws = cfg.paths.workspace / '.claude' / 'skills' / cfg.skill
+    ws.mkdir(parents=True); (ws / 'SKILL.md').write_text('机器人改过')
+    cli.main(['sync-skill', 'demo', '--direction', 'to-repo', '--yes'])
+    assert (repo / 'SKILL.md').read_text() == '机器人改过'
+    (repo / 'SKILL.md').write_text('人改过')
+    cli.main(['sync-skill', 'demo', '--direction', 'to-workspace', '--yes'])
+    assert (ws / 'SKILL.md').read_text() == '人改过'
+    cli.main(['sync-skill', 'demo', '--direction', 'to-repo'])
+    assert '一致' in capsys.readouterr().out
+
+
+def test_sync_skill_refuses_without_yes(cfg, tmp_path, monkeypatch):
+    repo = _mk_repo_skill(tmp_path, monkeypatch, skill=cfg.skill)
+    ws = cfg.paths.workspace / '.claude' / 'skills' / cfg.skill
+    ws.mkdir(parents=True); (ws / 'SKILL.md').write_text('不一样')
+    try:
+        cli.main(['sync-skill', 'demo', '--direction', 'to-repo'])
+        assert False, '应该拒绝'
+    except SystemExit as e:
+        assert '--yes' in str(e)
+    assert (repo / 'SKILL.md').read_text() == '仓库版'

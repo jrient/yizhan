@@ -13,6 +13,23 @@ from . import config as configmod, db as dbm
 from .paths import Paths
 
 TEMPLATES = Path(__file__).parent / 'templates'
+# 仓库里的 skill 源(进版本库)。工作台拿到的是**完整副本**,不是软链:
+# 机器人会自己改运行副本,两边隔离,要同步显式跑 yizhan sync-skill(用户 2026-09-21 要求)。
+REPO_SKILLS = Path(__file__).resolve().parent.parent / 'skills'
+
+
+def default_skill_name(inst: str) -> str:
+    """skill 名带实例前缀。原项目以 --add-dir 挂进来,它自己的 .claude/skills 里
+    常有同名的旧 skill,不加前缀两个同名 skill 会撞车(2026-09-21)。"""
+    return f'{inst}-feedback-group-reply'
+
+
+def repo_skill_dir(inst: str, skill: str) -> Path:
+    return REPO_SKILLS / skill
+
+
+def workspace_skill_dir(paths, skill: str) -> Path:
+    return paths.workspace / '.claude' / 'skills' / skill
 
 
 def _render(src: Path, dst: Path, mapping: dict[str, str]):
@@ -25,11 +42,22 @@ def _render(src: Path, dst: Path, mapping: dict[str, str]):
 
 def cmd_init(a) -> int:
     paths = Paths(a.inst)
+    a.skill = a.skill or default_skill_name(a.inst)
     project = str(Path(a.project).expanduser().resolve())
     if not Path(project).is_dir():
         sys.exit(f'项目目录不存在: {project}')
     paths.ensure()
     mapping = {'project_dir': project, 'skill': a.skill}
+
+    repo_skill = repo_skill_dir(a.inst, a.skill)
+    if repo_skill.is_dir():             # 仓库里已有这个实例的 skill → 整份复制进工作台
+        dst = workspace_skill_dir(paths, a.skill)
+        if dst.exists() and not a.force:
+            print(f'  跳过已存在的工作台 skill: {dst}')
+        else:
+            shutil.rmtree(dst, ignore_errors=True)
+            shutil.copytree(repo_skill, dst)
+            print(f'  从仓库复制 skill: {repo_skill} → {dst}')
 
     ws_tpl = TEMPLATES / 'workspace'
     n = 0
@@ -40,6 +68,7 @@ def cmd_init(a) -> int:
         # skill 目录按 --skill 改名
         parts = list(rel.parts)
         if len(parts) >= 4 and parts[:3] == ['.claude', 'skills', 'feedback-group-reply']:
+            # 模板目录名是通用的,落地时换成带实例前缀的真名
             parts[2] = a.skill
         dst = paths.workspace / Path(*parts)
         if dst.exists() and not a.force:
@@ -71,6 +100,30 @@ def cmd_init(a) -> int:
     print(f'  1. 编辑 {paths.config_file}(见第 4 节:飞书应用要开长连接并订阅 im.message.receive_v1)')
     print(f'  2. systemctl --user enable --now yizhan-listener@{a.inst} yizhan-dispatcher@{a.inst}.timer')
     print(f'  3. 把机器人拉进群,@ 一句验证;journalctl --user -u yizhan-listener@{a.inst} -f')
+    return 0
+
+
+def cmd_sync_skill(a) -> int:
+    """仓库副本与工作台副本之间**显式**同步。两份平时隔离,不会自动跟随。"""
+    cfg = configmod.load(a.inst)
+    skill = a.skill or cfg.skill
+    repo, ws = repo_skill_dir(a.inst, skill), workspace_skill_dir(cfg.paths, skill)
+    src, dst = (repo, ws) if a.direction == 'to-workspace' else (ws, repo)
+    if not src.is_dir():
+        sys.exit(f'源不存在: {src}')
+    if dst.exists() and not a.force:
+        import filecmp
+        d = filecmp.dircmp(str(src), str(dst))
+        changed = d.diff_files + d.left_only + d.right_only
+        if not changed:
+            print('两份内容一致,无需同步')
+            return 0
+        print(f'将覆盖 {dst},受影响: {changed}')
+        if not a.yes:
+            sys.exit('加 --yes 确认覆盖')
+    shutil.rmtree(dst, ignore_errors=True)
+    shutil.copytree(src, dst)
+    print(f'已复制 {src} → {dst}')
     return 0
 
 
@@ -158,9 +211,15 @@ def main(argv=None) -> int:
     sub = p.add_subparsers(dest='cmd', required=True)
     s = sub.add_parser('init', help='初始化一个实例(工作台骨架 + 配置模板)')
     s.add_argument('inst'); s.add_argument('--project', required=True)
-    s.add_argument('--skill', default='feedback-group-reply')
+    s.add_argument('--skill', help='默认 <inst>-feedback-group-reply')
     s.add_argument('--from-dir', dest='from_dir', help='旧 skill 目录,带入 reference/ 与旧 SKILL.md')
     s.add_argument('--force', action='store_true'); s.set_defaults(fn=cmd_init)
+    s = sub.add_parser('sync-skill', help='仓库副本 ↔ 工作台副本,显式同步')
+    s.add_argument('inst'); s.add_argument('--skill')
+    s.add_argument('--direction', choices=['to-workspace', 'to-repo'], default='to-repo',
+                   help='to-repo:把机器人改过的收回仓库(默认);to-workspace:用仓库那份覆盖工作台')
+    s.add_argument('--yes', action='store_true'); s.add_argument('--force', action='store_true')
+    s.set_defaults(fn=cmd_sync_skill)
     s = sub.add_parser('rotate', help='换一个新主会话'); s.add_argument('inst')
     s.add_argument('--reason', default='manual'); s.set_defaults(fn=cmd_rotate)
     s = sub.add_parser('pause', help='停 timer,交给人工接管'); s.add_argument('inst'); s.set_defaults(fn=cmd_pause)

@@ -69,6 +69,21 @@ def is_quiet(issue: sqlite3.Row, cfg: Config, now_ms: int) -> bool:
     return now_ms - int(issue['last_msg_at'] or 0) >= cfg.quiet_seconds * 1000
 
 
+def next_ready_at(conn, cfg: Config, now_ms: int) -> int | None:
+    """最早一张 open 卡什么时候可以派(毫秒时间戳)。没有 open 卡则 None。
+
+    只差静默窗的时候 dispatcher 应该等一下,不然它空转退出,得等 timer 下一分钟才回来,
+    白白多出最多 60 秒延迟(2026-09-21 实测:13:50:45 的消息 13:52 才开始处理)。
+    """
+    best = None
+    for it in dbm.issues_by_state(conn, ['open']):
+        t = int(it['last_msg_at'] or 0) + cfg.quiet_seconds * 1000
+        if it['defer_until']:
+            t = max(t, int(it['defer_until']))
+        best = t if best is None else min(best, t)
+    return best
+
+
 def pick_card(conn, cfg: Config, now_ms: int):
     """最早的 open 卡,且 defer 已到、静默窗已满。"""
     for it in dbm.issues_by_state(conn, ['open']):

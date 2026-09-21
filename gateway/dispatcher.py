@@ -96,7 +96,7 @@ def process_card(conn, cfg, client, it) -> str:
     return state
 
 
-def run_once(cfg, *, client=None, max_cards: int = 20) -> int:
+def run_once(cfg, *, client=None, max_cards: int = 20, max_wait_sec: float = 90) -> int:
     conn = dbm.connect(cfg.paths.db_file)
     client = client if client is not None else FeishuClient(cfg.app_id, cfg.app_secret)
     handled = 0
@@ -107,7 +107,14 @@ def run_once(cfg, *, client=None, max_cards: int = 20) -> int:
         cards.wake_deferred(conn, dbm.now_ms())
         it = cards.pick_card(conn, cfg, dbm.now_ms())
         if it is None:
-            break
+            # 只差静默窗就等它到点,别空转退出让 timer 再等一分钟
+            ready = cards.next_ready_at(conn, cfg, dbm.now_ms())
+            wait = (ready - dbm.now_ms()) / 1000 if ready else None
+            if wait is None or wait > max_wait_sec:
+                break
+            log.info('最早的卡还差 %.0f 秒到静默窗,等它', max(wait, 0))
+            time.sleep(max(wait, 0) + 0.5)
+            continue
         process_card(conn, cfg, client, it)
         handled += 1
     watchdog(conn, cfg, client)
