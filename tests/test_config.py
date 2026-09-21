@@ -19,3 +19,14 @@ def test_missing_required(inst_env):
 def test_missing_file(inst_env):
     with pytest.raises(config.ConfigError):
         config.load('nope')
+
+
+def test_default_config_dir_is_in_repo(monkeypatch):
+    """配置默认放项目自己的 config/ 下,不再是 ~/.config/yizhan。"""
+    monkeypatch.delenv('YIZHAN_CONFIG_DIR', raising=False)
+    from pathlib import Path
+    from gateway.paths import Paths, REPO_ROOT
+    p = Paths('demo')
+    assert p.config_file == REPO_ROOT / 'config' / 'demo.toml'
+    assert (REPO_ROOT / 'gateway' / 'paths.py').exists()      # REPO_ROOT 指的确实是仓库根
+    assert str(p.state_dir).startswith(str(Path.home()))      # 状态仍在用户目录

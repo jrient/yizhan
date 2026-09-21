@@ -1,4 +1,4 @@
-"""实例配置:~/.config/yizhan/<inst>.toml。"""
+"""实例配置:<项目>/config/<inst>.toml(gitignore 里,0600)。"""
 from __future__ import annotations
 
 import os

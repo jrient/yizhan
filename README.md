@@ -24,7 +24,7 @@ uv venv .venv && uv pip install -e '.[dev]'
 .venv/bin/yizhan install-units                       # 装 systemd user 单元(一次就够)
 .venv/bin/yizhan init drama-auto --project /data/projects/drama-auto \
     --from-dir /data/projects/drama-auto/.claude/skills/feedback-group-reply
-vi ~/.config/yizhan/drama-auto.toml                  # 填 app_id/app_secret/alert_open_id/group_allow
+vi config/drama-auto.toml                            # 填 app_id/app_secret/alert_open_id/group_allow
 systemctl --user enable --now yizhan-listener@drama-auto yizhan-dispatcher@drama-auto.timer
 loginctl enable-linger $USER
 ```
@@ -36,8 +36,10 @@ loginctl enable-linger $USER
 
 ## 每个实例的东西在哪
 
+配置跟着项目走,状态跟着用户走:
+
 ```
-~/.config/yizhan/<inst>.toml            凭证、项目目录、白名单(0600)
+/data/projects/yizhan/config/<inst>.toml   凭证、项目目录、白名单(0600,已 gitignore)
 ~/.local/state/yizhan/<inst>/
   ├── state.db                          事件、卡、回复、会话(WAL)
   ├── attachments/  logs/

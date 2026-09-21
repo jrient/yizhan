@@ -1,0 +1,25 @@
+# 驿站实例配置。权限 0600 —— 里面有应用密钥。
+app_id = "cli_填这里"
+app_secret = "填这里"
+project_dir = "/data/projects/你的项目"
+skill = "feedback-group-reply"
+
+# 告警收件人(机器人私聊你);进群、探活失败、卡 stuck 都发这里
+alert_open_id = "ou_填你的open_id"
+# 私聊白名单:只有这些人的私聊会被处理,其他只记录不回
+p2p_allow = []
+# 群白名单:显式列出。进了新群会私聊告警,确认后手工加进来再重启 listener
+group_allow = []
+
+quiet_seconds = 30        # 发起人最后一条消息静默多久才派单(同一人连发多条只回一次)
+lock_minutes = 25
+max_redispatch = 3
+merge_gap_minutes = 10
+idle_timeout_min = 15     # stream 无输出多久判卡死
+hard_timeout_min = 60
+# 注意:--dangerously-skip-permissions 会**连 settings.json 的 deny 清单一起绕过**。
+# 群消息是不可信输入,这个值只适合关起门来跑通第一天;跑通后立刻换成下面这行,
+# 让工作台 .claude/settings.json 的 allow/deny 真正生效:
+#   permission_args = ["--permission-mode", "dontAsk", "--permission-prompts", "none"]
+permission_args = ["--dangerously-skip-permissions"]
+rotate_at_tokens = 0      # >0 时上下文超过这么多 token 就主动换新会话(兜底,默认依赖自动压缩)

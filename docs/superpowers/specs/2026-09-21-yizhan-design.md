@@ -47,7 +47,7 @@
 目录:
 ```
 /data/projects/yizhan/                        代码(gateway/ 包)+ .venv + 工作台骨架模板
-~/.config/yizhan/<inst>.toml                  凭证、项目目录、白名单(0600)
+/data/projects/yizhan/config/<inst>.toml      凭证、项目目录、白名单(0600,gitignore)。v3 原写 ~/.config/yizhan/,用户 09-21 改为放项目下
 ~/.local/state/yizhan/<inst>/
   ├── state.db  attachments/  logs/
   └── workspace/                              claude 的 cwd
@@ -214,7 +214,7 @@ WantedBy=timers.target
 ## 6. 裂变到新项目
 
 1. 新建飞书应用(第 4 节)。
-2. `yizhan init <inst> --project <dir>`:生成 `~/.local/state/yizhan/<inst>/workspace/` 骨架(CLAUDE.md 纪律段、skill 骨架、settings 允许清单模板、notes/),写 `~/.config/yizhan/<inst>.toml` 模板。
+2. `yizhan init <inst> --project <dir>`:生成 `~/.local/state/yizhan/<inst>/workspace/` 骨架(CLAUDE.md 纪律段、skill 骨架、settings 允许清单模板、notes/),写 `config/<inst>.toml` 模板。
 3. 填 toml 里的凭证与白名单;按项目改 skill 的 `project.toml`(谁能授权改代码、库怎么查、归档去向)。
 4. `systemctl --user enable --now yizhan-listener@<inst> yizhan-dispatcher@<inst>.timer`。
 5. 拉进群,@ 一句验证。
