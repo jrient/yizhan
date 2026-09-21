@@ -1,0 +1,4 @@
+<!doctype html><meta charset="utf-8"><title>驿站</title>
+<h1>实例</h1>
+<ul>{% for i in instances %}<li><a href="/i/{{ i.inst }}">{{ i.inst }}</a> {{ i.health }} {{ i.health_reason }}</li>{% endfor %}</ul>
+<a href="/new">新建实例</a>

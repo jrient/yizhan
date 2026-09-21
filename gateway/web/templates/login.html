@@ -1,0 +1,6 @@
+<!doctype html><meta charset="utf-8"><title>驿站 · 登录</title>
+<form method="post" action="/login">
+  {% if error %}<p class="err">{{ error }}</p>{% endif %}
+  <input type="password" name="password" placeholder="口令" autofocus>
+  <button type="submit">进去</button>
+</form>
