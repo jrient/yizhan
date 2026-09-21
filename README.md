@@ -12,6 +12,7 @@
 |---|---|---|
 | `listener` | 常驻长连接,只写库;@ 我时立即拉起 dispatcher | `yizhan-listener@<inst>.service` |
 | `dispatcher` | oneshot,归卡 → 取卡 → 唤起 claude → 收尾,循环到没卡 | timer 每分钟兜底 + listener 触发 |
+| `web` | 控制台:实例管理与监控 | `yizhan-web.service`,默认 8760 端口 |
 | `fgctl` | claude 会话内唯一的读卡/回群/销账入口(带证据门) | 会话里直接调 |
 
 原项目只以 `--add-dir` 挂入,**零污染**:机器人的 CLAUDE.md、skill、归档、记忆全在自己的工作台目录。
@@ -73,6 +74,21 @@ permission_args = ["--permission-mode", "dontAsk", "--permission-prompts", "none
 ```
 
 无头模式下未预批的调用直接被拒、不会挂住;拒绝会记日志,按日志补 allow 清单。
+
+## Web 控制台
+
+浏览器里管实例、看健康:卡片墙一眼扫全部实例,点进去有概览、卡、会话、日志、配置五个页签,
+还能在页面上新建实例(填凭证 → 当场验证 → 一键启用)。
+
+```bash
+yizhan web-init                                  # 生成 config/web.toml 与随机口令(只打印一次)
+yizhan install-units                             # 单元里已包含 yizhan-web
+systemctl --user enable --now yizhan-web
+```
+
+访问 `http://<本机地址>:8760`,输口令进。分享给同事就是把口令给他;密钥字段在页面上只显示末四位。
+
+设计沿用 `ui-unify` 统一体系,深色为主、浅色自动跟随,和其他后台工具长一样。
 
 ## 日常运维
 
