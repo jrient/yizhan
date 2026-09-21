@@ -1,20 +1,62 @@
+let overviewChartInst = null;
+let overviewChartData = null;
+let sessionChartInst = null;
+let sessionChartData = null;
+
+// 取 token 的**已解析**色值给 canvas 用。
+//
+// 不能直接 getComputedStyle(el).getPropertyValue('--accent'):自定义属性返回的是原文,
+// 而 tokens.css 用的是 light-dark(#157a54, #3ecf8e),canvas 不认这个字符串,
+// uPlot 会静默退回黑色(2026-09-21 图表全黑就是这个原因)。
+// 办法是让浏览器真解析一次:把 var(--x) 赋给一个探针元素的 color,再读回 rgb()。
+let _probe = null;
+const css = (name) => {
+  if (!_probe) {
+    _probe = document.createElement('span');
+    _probe.style.cssText = 'position:absolute;visibility:hidden;pointer-events:none';
+    document.body.appendChild(_probe);
+  }
+  _probe.style.color = '';
+  _probe.style.color = `var(${name})`;
+  const v = getComputedStyle(_probe).color;
+  return v && v !== 'rgba(0, 0, 0, 0)' ? v : getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+};
+
 // Theme management
 function setTheme(t) {
-  if (t) {
+  if (t === 'system' || t === '') {
+    delete document.documentElement.dataset.theme;
+    localStorage.setItem('theme', 'system');
+    t = '';
+  } else {
     document.documentElement.dataset.theme = t;
     localStorage.setItem('theme', t);
-  } else {
-    delete document.documentElement.dataset.theme;
-    localStorage.removeItem('theme');
   }
   document.querySelectorAll('#theme-seg button').forEach(function(b){
-    b.classList.toggle('active', (b.dataset.theme || '') === (t || ''));
+    const btnTheme = b.dataset.theme || 'system';
+    const targetTheme = (t === '' || !t) ? 'system' : t;
+    b.classList.toggle('active', btnTheme === targetTheme || (b.dataset.theme === '' && targetTheme === 'system'));
   });
+  
+  if (window.drawOverviewChart && overviewChartData) window.drawOverviewChart(overviewChartData);
+  if (window.drawSessionChart && sessionChartData) window.drawSessionChart(sessionChartData);
 }
 // Init theme
-const savedTheme = localStorage.getItem('theme');
-if (savedTheme) { setTheme(savedTheme); }
+let savedTheme = localStorage.getItem('theme');
+if (!savedTheme) {
+  savedTheme = 'dark';
+}
+setTheme(savedTheme === 'system' ? '' : savedTheme);
 
+const resizeObserver = new ResizeObserver(() => {
+  if (overviewChartInst && document.getElementById('overview-chart')) {
+    overviewChartInst.setSize({width: document.getElementById('overview-chart').clientWidth, height: 250});
+  }
+  if (sessionChartInst && document.getElementById('session-chart')) {
+    sessionChartInst.setSize({width: document.getElementById('session-chart').clientWidth, height: 250});
+  }
+});
+resizeObserver.observe(document.body);
 // Toast
 function showToast(title, desc, type = 'info') {
   const stack = document.getElementById('toast-container');
@@ -240,29 +282,95 @@ async function renderOverview() {
     `;
     document.getElementById('tab-content').innerHTML = html;
     
-    // Draw chart
-    if (data.hourly && data.hourly.length > 0) {
-      let x = data.hourly.map(h => {
-        let d = new Date();
-        d.setHours(parseInt(h.hour), 0, 0, 0);
-        return Math.floor(d.getTime()/1000);
-      });
-      let msgs = data.hourly.map(h => h.msgs);
-      let cards = data.hourly.map(h => h.cards);
+    window.drawOverviewChart = function(chartData) {
+      overviewChartData = chartData;
+      const container = document.getElementById('overview-chart');
+      if (!container) return;
+      container.innerHTML = '';
+      if (overviewChartInst) {
+        overviewChartInst.destroy();
+        overviewChartInst = null;
+      }
       
-      const opts = {
-        width: document.getElementById('overview-chart').clientWidth,
-        height: 250,
-        series: [
-          {},
-          { label: "消息", stroke: "var(--accent)", fill: "var(--accent-ring)", width: 2 },
-          { label: "卡片", stroke: "var(--warn)", width: 2 }
-        ]
-      };
-      new uPlot(opts, [x, msgs, cards], document.getElementById('overview-chart'));
-    } else {
-      document.getElementById('overview-chart').innerHTML = '<div class="ui-empty"><div class="desc">暂无趋势数据</div></div>';
-    }
+      if (chartData.hourly && chartData.hourly.length > 0) {
+        let x = chartData.hourly.map(h => {
+          let d = new Date();
+          d.setHours(parseInt(h.hour), 0, 0, 0);
+          return Math.floor(d.getTime()/1000);
+        });
+        let msgs = chartData.hourly.map(h => h.msgs);
+        let cards = chartData.hourly.map(h => h.cards);
+        
+        const legendDiv = document.createElement('div');
+        legendDiv.style.textAlign = 'center';
+        legendDiv.style.color = css('--text');
+        legendDiv.style.minHeight = '24px';
+        legendDiv.style.fontSize = '14px';
+        legendDiv.style.marginBottom = '8px';
+        legendDiv.innerHTML = '<span class="ui-muted">悬停查看数据</span>';
+        container.appendChild(legendDiv);
+    
+        const chartDiv = document.createElement('div');
+        container.appendChild(chartDiv);
+    
+        const opts = {
+          width: container.clientWidth,
+          height: 250,
+          legend: { show: false },
+          axes: [
+            {
+              stroke: css('--text-2'),
+              grid: { stroke: css('--border-subtle'), width: 1 },
+              ticks: { stroke: css('--border-subtle'), width: 1 },
+              values: (u, vals) => vals.map(v => {
+                let d = new Date(v * 1000);
+                return `${d.getHours()}:00`;
+              })
+            },
+            {
+              stroke: css('--text-2'),
+              grid: { stroke: css('--border-subtle'), width: 1 },
+              ticks: { stroke: css('--border-subtle'), width: 1 },
+              values: (u, vals) => vals.map(v => v >= 1000 ? (v/1000).toFixed(1) + 'k' : v)
+            }
+          ],
+          series: [
+            {},
+            {
+              label: "消息",
+              stroke: css('--accent'),
+              fill: css('--accent-ring'),
+              width: 2,
+              points: { show: true, fill: css('--bg'), stroke: css('--accent'), size: 6 }
+            },
+            {
+              label: "卡片",
+              stroke: css('--warn'),
+              width: 2,
+              points: { show: true, fill: css('--bg'), stroke: css('--warn'), size: 6 }
+            }
+          ],
+          hooks: {
+            setCursor: [
+              (u) => {
+                const idx = u.cursor.idx;
+                if (idx === null || idx === undefined || idx < 0) {
+                  legendDiv.innerHTML = '<span class="ui-muted">悬停查看数据</span>';
+                  return;
+                }
+                let d = new Date(x[idx] * 1000);
+                legendDiv.innerHTML = `${d.getHours()}:00 &middot; 消息 <strong style="color:${css('--accent')}">${msgs[idx]}</strong> &middot; 卡 <strong style="color:${css('--warn')}">${cards[idx]}</strong>`;
+              }
+            ]
+          }
+        };
+        overviewChartInst = new uPlot(opts, [x, msgs, cards], chartDiv);
+      } else {
+        container.innerHTML = '<div class="ui-empty"><div class="desc">暂无趋势数据</div></div>';
+      }
+    };
+    
+    if (window.drawOverviewChart) window.drawOverviewChart(data);
     
   } catch(e) { console.error(e); }
 }
@@ -400,8 +508,15 @@ async function renderSession() {
     let html = `
       <div class="ui-card mb-4">
         <div class="ui-desc">
-          <dt>当前 Session ID</dt><dd class="ui-mono">${data.current_session_id || '--'} </dd>
-          <dt>新鲜度 (Fresh)</dt><dd>${data.fresh ? '是' : '否'}</dd>
+          <dt>当前 Session ID</dt>
+          <dd class="ui-mono" style="display:flex; align-items:center; gap:8px;">
+            ${data.session && data.session.session_id ? 
+              `${data.session.session_id.substring(0,8)} 
+               <button class="ui-btn" style="padding: 2px 6px; font-size: 11px;" onclick="navigator.clipboard.writeText('${data.session.session_id}'); showToast('已复制', '', 'ok')">复制</button>` 
+              : '--'}
+          </dd>
+          <dt>新鲜度 (Fresh)</dt><dd>${data.session ? (data.session.fresh ? '是' : '否') : '--'}</dd>
+          <dt>创建时间</dt><dd>${data.session ? new Date(data.session.created_at).toLocaleString() : '--'}</dd>
           <dt>累计成本</dt><dd>$${(data.total_cost_usd || 0).toFixed(4)}</dd>
         </div>
       </div>
@@ -430,54 +545,119 @@ async function renderSession() {
     `;
     document.getElementById('tab-content').innerHTML = html;
     
-    if (data.rounds && data.rounds.length > 0) {
-      let x = data.rounds.map(r => r.round_id);
-      let y = data.rounds.map(r => r.context_tokens);
-      let issues = data.rounds.map(r => r.issue_id);
-      let costs = data.rounds.map(r => r.cost_usd);
+    window.drawSessionChart = function(chartData) {
+      sessionChartData = chartData;
+      const container = document.getElementById('session-chart');
+      if (!container) return;
+      container.innerHTML = '';
+      if (sessionChartInst) {
+        sessionChartInst.destroy();
+        sessionChartInst = null;
+      }
       
-      const opts = {
-        width: document.getElementById('session-chart').clientWidth,
-        height: 250,
-        scales: { x: { time: false } },
-        cursor: {
-          dataIdx: (u, seriesIdx, closestIdx, xValue) => {
-            return closestIdx;
+      if (chartData.rounds && chartData.rounds.length > 0) {
+        let seqX = chartData.rounds.map((r, i) => i);
+        let series_answered = [];
+        let series_stuck = [];
+        let series_waiting = [];
+        let series_other = [];
+    
+        chartData.rounds.forEach(r => {
+          let v = r.context_tokens;
+          series_answered.push(r.outcome === 'answered' ? v : null);
+          series_stuck.push(r.outcome === 'stuck' ? v : null);
+          series_waiting.push(r.outcome === 'waiting' ? v : null);
+          series_other.push(!['answered', 'stuck', 'waiting'].includes(r.outcome) ? v : null);
+        });
+        
+        const legendDiv = document.createElement('div');
+        legendDiv.style.textAlign = 'center';
+        legendDiv.style.color = css('--text');
+        legendDiv.style.minHeight = '24px';
+        legendDiv.style.fontSize = '14px';
+        legendDiv.style.marginBottom = '8px';
+        legendDiv.innerHTML = '<span class="ui-muted">悬停查看数据</span>';
+        container.appendChild(legendDiv);
+    
+        const chartDiv = document.createElement('div');
+        container.appendChild(chartDiv);
+        
+        let timeFmt = (ts) => {
+          let d = new Date(ts);
+          return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+        };
+    
+        const opts = {
+          width: container.clientWidth,
+          height: 250,
+          legend: { show: false },
+          scales: {
+            x: { time: false, range: [-0.5, Math.max(seqX.length - 0.5, 4.5)] },
+            // 柱状图的基线必须是 0。截断基线会把 34.2 万 vs 35.7 万(差 4%)
+            // 画成一根矮墩一根高柱,看着像差好几倍(2026-09-21 截图时发现)。
+            y: { range: (u, min, max) => [0, (max || 1) * 1.15] }
+          },
+          axes: [
+            {
+              stroke: css('--text-2'),
+              grid: { show: false },
+              ticks: { stroke: css('--border-subtle'), width: 1 },
+              values: (u, vals) => vals.map(v => {
+                if (v !== Math.floor(v)) return ''; // 绝不出现小数
+                if (v >= 0 && v < chartData.rounds.length) {
+                  return timeFmt(chartData.rounds[v].started_at); // 标签用 HH:MM
+                }
+                return '';
+              })
+            },
+            {
+              stroke: css('--text-2'),
+              grid: { stroke: css('--border-subtle'), width: 1 },
+              ticks: { stroke: css('--border-subtle'), width: 1 },
+              values: (u, vals) => vals.map(v => v >= 1000 ? (v/1000).toFixed(1) + 'k' : v)
+            }
+          ],
+          series: [
+            {},
+            { label: "answered", stroke: css('--accent'), fill: css('--accent'), paths: uPlot.paths.bars ? uPlot.paths.bars({ size: [0.6, 60] }) : null },
+            { label: "stuck", stroke: css('--danger'), fill: css('--danger'), paths: uPlot.paths.bars ? uPlot.paths.bars({ size: [0.6, 60] }) : null },
+            { label: "waiting", stroke: css('--warn'), fill: css('--warn'), paths: uPlot.paths.bars ? uPlot.paths.bars({ size: [0.6, 60] }) : null },
+            { label: "other", stroke: css('--idle'), fill: css('--idle'), paths: uPlot.paths.bars ? uPlot.paths.bars({ size: [0.6, 60] }) : null }
+          ],
+          hooks: {
+            setCursor: [
+              (u) => {
+                const idx = u.cursor.idx;
+                if (idx === null || idx === undefined || idx < 0 || idx >= chartData.rounds.length) {
+                  legendDiv.innerHTML = '<span class="ui-muted">悬停查看数据</span>';
+                  return;
+                }
+                let r = chartData.rounds[idx];
+                let ctx = r.context_tokens >= 1000 ? (r.context_tokens/1000).toFixed(1) + 'k' : r.context_tokens;
+                legendDiv.innerHTML = `卡 #${r.issue_id} &middot; ${timeFmt(r.started_at)} &middot; 上下文 ${ctx} &middot; 输出 ${r.output_tokens} &middot; $${r.cost_usd.toFixed(2)} &middot; <strong style="color:${css('--text')}">${r.outcome}</strong>`;
+              }
+            ]
           }
-        },
-        series: [
-          {},
-          {
-            label: "上下文 Token",
-            stroke: "var(--accent)",
-            fill: "var(--accent)",
-            paths: uPlot.paths.bars ? uPlot.paths.bars({ size: [0.6, 100] }) : null,
-            value: (u, v, sIdx, dIdx) => {
-              if (v == null) return '--';
-              let issue = issues[dIdx];
-              let cost = costs[dIdx];
-              return `${v} (卡#${issue}, $${cost.toFixed(2)})`;
+        };
+        
+        sessionChartInst = new uPlot(opts, [seqX, series_answered, series_stuck, series_waiting, series_other], chartDiv);
+        
+        sessionChartInst.root.addEventListener('click', (e) => {
+          const idx = sessionChartInst.cursor.idx;
+          if (idx != null && idx >= 0 && idx < chartData.rounds.length) {
+            const issueId = chartData.rounds[idx].issue_id;
+            if (issueId) {
+               switchTab('cards');
+               setTimeout(() => openCardDrawer(issueId), 500);
             }
           }
-        ]
-      };
-      
-      const plot = new uPlot(opts, [x, y], document.getElementById('session-chart'));
-      
-      plot.root.addEventListener('click', (e) => {
-        const idx = plot.cursor.idx;
-        if (idx != null && idx >= 0) {
-          const issueId = issues[idx];
-          if (issueId) {
-             switchTab('cards');
-             setTimeout(() => openCardDrawer(issueId), 500);
-          }
-        }
-      });
-      
-    } else {
-      document.getElementById('session-chart').innerHTML = '<div class="ui-empty"><div class="desc">暂无轮次数据</div></div>';
-    }
+        });
+      } else {
+        container.innerHTML = '<div class="ui-empty"><div class="desc">暂无轮次数据</div></div>';
+      }
+    };
+    
+    if (window.drawSessionChart) window.drawSessionChart(data);
   } catch (e) { console.error(e); }
 }
 
