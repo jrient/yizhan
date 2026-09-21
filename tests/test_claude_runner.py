@@ -76,3 +76,20 @@ def test_probe(fcfg):
     fcfg.claude_bin = '/nonexistent/claude'
     ok, msg = cr.probe(fcfg)
     assert not ok and '找不到' in msg
+
+
+def test_context_tokens_takes_max_not_sum():
+    """顶层 usage 是整轮累计,同一份上下文被反复计进 cache_read;窗口占用要取单条最大。"""
+    lines = [
+        {'type': 'assistant', 'message': {'usage': {'input_tokens': 2, 'cache_read_input_tokens': 40_000}}},
+        {'type': 'assistant', 'message': {'usage': {'input_tokens': 2, 'cache_read_input_tokens': 44_000,
+                                                    'cache_creation_input_tokens': 1_000}}},
+        {'type': 'result', 'usage': {'cache_read_input_tokens': 482_546}},
+    ]
+    assert cr.context_tokens(lines) == 45_002
+    assert cr.context_tokens([]) == 0
+
+
+def test_run_reports_context_tokens(fcfg, tmp_path):
+    r = run(fcfg, tmp_path)
+    assert r.context_tokens == 40

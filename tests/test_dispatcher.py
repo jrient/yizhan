@@ -104,11 +104,8 @@ def test_quiet_window_skips_recent_message(dcfg):
     assert dispatcher.run_once(dcfg, client=FakeClient()) == 0
 
 
-def test_context_tokens_and_threshold_rotate(dcfg):
-    assert dispatcher.context_tokens(None) == 0
-    assert dispatcher.context_tokens({'input_tokens': 10, 'cache_read_input_tokens': 5,
-                                      'cache_creation_input_tokens': 1}) == 16
-    dcfg.rotate_at_tokens = 5           # 假 claude 报 input 10 + output 2 → 超阈值
+def test_threshold_rotate(dcfg):
+    dcfg.rotate_at_tokens = 5           # 假 claude 的 assistant 消息报 input 40 → 超阈值
     conn = dbm.connect(dcfg.paths.db_file); seed(conn, dcfg)
     first = dbm.session_rotate(conn, 'init'); dbm.session_mark_used(conn); conn.close()
     c = FakeClient()

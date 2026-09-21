@@ -31,6 +31,7 @@ class RunResult:
     idle_killed: bool = False
     hard_killed: bool = False
     resume_failed: bool = False
+    context_tokens: int = 0
     lines: list[dict] = field(default_factory=list)
 
     @property
@@ -104,11 +105,31 @@ def run_claude(cfg, workspace: Path, prompt: str, session_id: str | None, *, res
         res.rc = proc.wait()
         if lf:
             lf.close()
+    res.context_tokens = context_tokens(res.lines)
     blob = res.stderr + json.dumps(res.result or {}, ensure_ascii=False)
     if resume and session_id and any(m in blob for m in RESUME_FAIL_MARKS):
         res.resume_failed = True
-    log.info('exit rc=%s idle=%s hard=%s resume_failed=%s', res.rc, res.idle_killed, res.hard_killed, res.resume_failed)
+    log.info('exit rc=%s idle=%s hard=%s resume_failed=%s context=%d tokens',
+             res.rc, res.idle_killed, res.hard_killed, res.resume_failed, res.context_tokens)
     return res
+
+
+def context_tokens(lines: list[dict]) -> int:
+    """会话占了多少上下文窗口。
+
+    取**单条 assistant 消息**的 input + cache_read + cache_creation 的最大值,不是整轮累加:
+    result 里的顶层 usage 是一轮内所有请求的累计,同一份上下文被反复计入 cache_read
+    (2026-09-21 实测:一条「1」的私聊,顶层累计 51 万,实际窗口只有 4 万出头),
+    拿它判轮换阈值会误判。
+    """
+    best = 0
+    for o in lines:
+        u = (o.get('message') or {}).get('usage') if isinstance(o.get('message'), dict) else None
+        if not u:
+            continue
+        best = max(best, sum(int(u.get(k) or 0) for k in
+                             ('input_tokens', 'cache_read_input_tokens', 'cache_creation_input_tokens')))
+    return best
 
 
 def _kill_group(proc):
