@@ -1,0 +1,9 @@
+Metadata-Version: 2.4
+Name: yizhan
+Version: 0.1.0
+Summary: 驿站:飞书 → Claude Code 网关
+Requires-Python: >=3.12
+Requires-Dist: lark-oapi>=1.4
+Requires-Dist: requests>=2.31
+Provides-Extra: dev
+Requires-Dist: pytest>=8; extra == "dev"

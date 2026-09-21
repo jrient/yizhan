@@ -1,0 +1,3 @@
+[console_scripts]
+fgctl = gateway.fgctl:main
+yizhan = gateway.cli:main

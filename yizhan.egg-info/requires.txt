@@ -1,0 +1,5 @@
+lark-oapi>=1.4
+requests>=2.31
+
+[dev]
+pytest>=8

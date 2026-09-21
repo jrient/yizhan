@@ -1,0 +1,27 @@
+[project]
+name = "yizhan"
+version = "0.1.0"
+description = "驿站:飞书 → Claude Code 网关"
+requires-python = ">=3.12"
+dependencies = ["lark-oapi>=1.4", "requests>=2.31"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[project.scripts]
+yizhan = "gateway.cli:main"
+fgctl = "gateway.fgctl:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["gateway"]
+include-package-data = true
+
+[tool.setuptools.package-data]
+gateway = ["templates/**/*", "templates/**/.claude/**/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
