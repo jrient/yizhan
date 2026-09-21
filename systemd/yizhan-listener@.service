@@ -1,0 +1,14 @@
+[Unit]
+Description=驿站 listener (%i):飞书长连接 → state.db
+After=network-online.target
+
+[Service]
+Type=simple
+ExecStart={repo}/.venv/bin/python -m gateway.listener %i
+Restart=always
+RestartSec=5
+Environment=TZ=Asia/Shanghai
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=default.target

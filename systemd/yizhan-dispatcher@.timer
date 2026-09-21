@@ -1,0 +1,10 @@
+[Unit]
+Description=驿站 dispatcher 兜底轮询 (%i)
+
+[Timer]
+OnBootSec=1min
+OnUnitInactiveSec=1min
+Unit=yizhan-dispatcher@%i.service
+
+[Install]
+WantedBy=timers.target

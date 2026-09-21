@@ -1,0 +1,15 @@
+# 本项目的具体情况,skill 的流程引用这里。裂变到新项目时逐项改。
+project_dir = "{project_dir}"
+
+# 谁能授权改代码(open_id → 说明)
+[authorizers]
+# "ou_xxxx" = "张三,产品负责人"
+
+# 库怎么查
+[data]
+# db = "mysql://... 或 docker compose exec db mysql ..."
+# 常用表 = "video_tasks.request_payload 是实发 payload;shot_groups.prompt 是分镜词"
+
+# 归档去向
+[archive]
+notes = "工作台 notes/ 下按问题编号建文件"

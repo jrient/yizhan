@@ -1,0 +1,10 @@
+[Unit]
+Description=驿站 dispatcher (%i):取卡并唤起 claude
+
+[Service]
+Type=oneshot
+ExecStart={repo}/.venv/bin/python -m gateway.dispatcher %i
+Environment=TZ=Asia/Shanghai
+Environment=PYTHONUNBUFFERED=1
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+TimeoutStartSec=3900

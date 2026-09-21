@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(fgctl:*)",
+      "Bash(ls:*)", "Bash(cat:*)", "Bash(head:*)", "Bash(tail:*)", "Bash(sed:*)",
+      "Bash(grep:*)", "Bash(rg:*)", "Bash(find:*)", "Bash(wc:*)", "Bash(date)",
+      "Bash(python3:*)", "Bash(ffmpeg:*)", "Bash(ffprobe:*)",
+      "Read", "Glob", "Grep", "Write", "Edit"
+    ],
+    "deny": [
+      "Bash(rm:*)", "Bash(sudo:*)", "Bash(curl:*)", "Bash(wget:*)",
+      "Bash(git push:*)", "Bash(docker:*)",
+      "Read(**/.env)", "Read(**/.credentials.json)"
+    ]
+  }
+}
