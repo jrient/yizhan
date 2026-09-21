@@ -32,9 +32,19 @@ def test_reply_payload_and_thread():
 
 
 def test_rate_limit_backoff():
-    c, calls = make([FakeResp({'code': 99991400, 'msg': 'limit'}), FakeResp({'code': 0, 'data': {'bot': {'open_id': 'ou_bot'}}})])
+    # /bot/v3/info 的 bot 在响应顶层,不在 data 下 —— 假数据要跟真接口一致
+    c, calls = make([FakeResp({'code': 99991400, 'msg': 'limit'}), FakeResp({'code': 0, 'bot': {'open_id': 'ou_bot'}})])
     assert c.bot_open_id() == 'ou_bot'
     assert ('sleep', 1.0) in calls
+
+
+def test_bot_open_id_reads_top_level_bot():
+    """回归:曾把 bot 当成在 data 下,取到空串,群消息的 @我 判定因此全部失效。"""
+    c, _ = make([FakeResp({'code': 0, 'bot': {'open_id': 'ou_bot'}})])
+    assert c.bot_open_id() == 'ou_bot'
+    # 真接口没有 data 字段,若哪天又回去读 data,这里会退回空串
+    c2, _ = make([FakeResp({'code': 0, 'data': {'bot': {'open_id': 'ou_bot'}}})])
+    assert c2.bot_open_id() == ''
 
 
 def test_list_paginates():

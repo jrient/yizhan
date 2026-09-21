@@ -37,7 +37,8 @@ class FeishuClient:
         self._token_exp = time.time() + int(r.get('expire', 7200)) - 300
         return self._token
 
-    def _req(self, method: str, path: str, *, params=None, json_body=None, raw=False, timeout=None):
+    def _req(self, method: str, path: str, *, params=None, json_body=None, raw=False, timeout=None,
+             envelope: str = 'data'):
         delay = 1.0
         for attempt in range(4):
             resp = self.http.request(method, f'{BASE}{path}', params=params, json=json_body,
@@ -58,13 +59,15 @@ class FeishuClient:
                 continue
             if r.get('code') != 0:
                 raise FeishuError(r.get('code'), r.get('msg'), r.get('data'))
-            return r.get('data') or {}
+            return r.get(envelope) or {}
         raise FeishuError(429, '限流重试耗尽')
 
     # ---- bot / chat ----
     def bot_open_id(self) -> str:
-        d = self._req('GET', '/bot/v3/info')
-        return (d.get('bot') or {}).get('open_id') or ''
+        # /bot/v3/info 把机器人信息放在响应顶层的 bot 键下,没有 data 字段。
+        # 走默认的 data 信封会拿到空字典,open_id 恒为空串,群消息的 @我 判定会全部失效。
+        d = self._req('GET', '/bot/v3/info', envelope='bot')
+        return d.get('open_id') or ''
 
     def chat_info(self, chat_id: str) -> dict:
         return self._req('GET', f'/im/v1/chats/{chat_id}')
