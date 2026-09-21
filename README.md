@@ -50,6 +50,19 @@ loginctl enable-linger $USER
       └── notes/                        问题归档
 ```
 
+## 坑:systemd 下 claude 报 403
+
+`claude` 在这台机器上要走本地代理才连得上 API,而 systemd 服务没有 shell 里的代理变量,
+探活会直接 `403 Request not allowed`,卡全堆着没人处理(2026-09-21 实测)。配置里写清楚:
+
+```toml
+[claude_env]
+https_proxy = "http://127.0.0.1:7890"
+http_proxy  = "http://127.0.0.1:7890"
+```
+
+飞书接口不走代理,客户端已经关了 `trust_env`,两边互不影响。
+
 ## 权限:第一天之后就换掉
 
 模板里的 `permission_args = ["--dangerously-skip-permissions"]` 只适合关起门来跑通,因为它
