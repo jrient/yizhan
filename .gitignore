@@ -9,4 +9,5 @@ __pycache__/
 # 实例配置:明文 app_secret,永远不进版本库
 config/*.toml
 !config/example.toml
+!config/web.example.toml
 .superpowers/
