@@ -69,13 +69,23 @@ def process_card(conn, cfg, client, it) -> str:
     if fresh:
         s = dbm.session_get(conn)
         prompt = FRESH_PREFIX.format(reason=(s['reason'] if s else 'init')) + prompt
-    cards.lock_card(conn, cfg, iid, f'pid:{time.time():.0f}', dbm.now_ms())
+    started = dbm.now_ms()
+    cards.lock_card(conn, cfg, iid, f'pid:{time.time():.0f}', started)
     res = claude_runner.run_claude(cfg, cfg.paths.workspace, prompt, sid, resume=not fresh,
                                    log_file=cfg.paths.logs / 'claude-stream.jsonl')
+    cost = float((res.result or {}).get('total_cost_usd') or 0.0)
+    out_tokens = int((res.usage or {}).get('output_tokens') or 0)
+
+    def _round(outcome):
+        dbm.insert_round(conn, issue_id=iid, session_id=sid, started_at=started, ended_at=dbm.now_ms(),
+                         rc=res.rc, context_tokens=res.context_tokens, output_tokens=out_tokens,
+                         cost_usd=cost, outcome=outcome)
+
     if res.resume_failed:
         new_sid = dbm.session_rotate(conn, 'resume_failed')
         alert(conn, client, cfg, 'session_rotate', f'--resume {sid} 失败,已轮换到 {new_sid}')
         cards.finish_card(conn, cfg, iid)
+        _round('rotated')
         return 'rotated'
     dbm.session_mark_used(conn, res.usage)
     ctx_tokens = res.context_tokens
@@ -88,6 +98,7 @@ def process_card(conn, cfg, client, it) -> str:
     if res.idle_killed or res.hard_killed:
         log.warning('卡 #%s 超时被杀 idle=%s hard=%s', iid, res.idle_killed, res.hard_killed)
     state = cards.finish_card(conn, cfg, iid)
+    _round(state)
     if state == 'stuck':
         alert(conn, client, cfg, f'stuck:{iid}',
               f'卡 #{iid} 重派 {cfg.max_redispatch} 次仍未答复,已标 stuck。'

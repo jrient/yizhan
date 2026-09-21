@@ -89,6 +89,22 @@ CREATE TABLE IF NOT EXISTS session (
   usage       TEXT,
   fresh       INTEGER DEFAULT 1     -- 1 = 还没跑过第一轮(不能 --resume)
 );
+CREATE TABLE IF NOT EXISTS rounds (
+  round_id       INTEGER PRIMARY KEY AUTOINCREMENT,
+  issue_id       INTEGER,
+  session_id     TEXT,
+  started_at     INTEGER,
+  ended_at       INTEGER,
+  rc             INTEGER,
+  context_tokens INTEGER,
+  output_tokens  INTEGER,
+  cost_usd       REAL,
+  outcome        TEXT          -- answered/waiting/open/stuck/rotated
+);
+CREATE INDEX IF NOT EXISTS ix_rounds_issue ON rounds(issue_id);
+CREATE TABLE IF NOT EXISTS session_history (
+  session_id TEXT PRIMARY KEY, created_at INTEGER, reason TEXT, prev_id TEXT, ended_at INTEGER
+);
 CREATE TABLE IF NOT EXISTS cursor (
   key TEXT PRIMARY KEY, last_time INTEGER
 );
@@ -220,16 +236,44 @@ def session_get(conn):
 def session_rotate(conn, reason: str) -> str:
     prev = session_get(conn)
     sid = str(uuid.uuid4())
+    t = now_ms()
     conn.execute('INSERT INTO session(id,session_id,created_at,reason,prev_id,fresh) VALUES(1,?,?,?,?,1) '
                  'ON CONFLICT(id) DO UPDATE SET session_id=excluded.session_id, created_at=excluded.created_at, '
                  'reason=excluded.reason, prev_id=excluded.prev_id, fresh=1, usage=NULL',
-                 (sid, now_ms(), reason, prev['session_id'] if prev else None))
+                 (sid, t, reason, prev['session_id'] if prev else None))
+    if prev:
+        conn.execute('UPDATE session_history SET ended_at=? WHERE session_id=? AND ended_at IS NULL',
+                     (t, prev['session_id']))
+    conn.execute('INSERT OR IGNORE INTO session_history(session_id,created_at,reason,prev_id,ended_at) '
+                 'VALUES(?,?,?,?,NULL)', (sid, t, reason, prev['session_id'] if prev else None))
     return sid
 
 
 def session_mark_used(conn, usage: dict | None = None):
     conn.execute('UPDATE session SET fresh=0, usage=COALESCE(?,usage) WHERE id=1',
                  (json.dumps(usage, ensure_ascii=False) if usage else None,))
+
+
+def insert_round(conn, *, issue_id, session_id, started_at, ended_at, rc, context_tokens,
+                 output_tokens, cost_usd, outcome):
+    """一轮 claude 的账。页面的成本与会话曲线读这张表。
+
+    claude-stream.jsonl 里有 token 与 total_cost_usd,但没有卡号,对不上卡;
+    session 表只留当前与上一个 id,没有完整轮换史。所以两样都在这里落库(2026-09-21)。
+    """
+    conn.execute('INSERT INTO rounds(issue_id,session_id,started_at,ended_at,rc,context_tokens,'
+                 'output_tokens,cost_usd,outcome) VALUES(?,?,?,?,?,?,?,?,?)',
+                 (issue_id, session_id, started_at, ended_at, rc, context_tokens, output_tokens,
+                  cost_usd, outcome))
+
+
+def rounds(conn, limit: int = 200) -> list[sqlite3.Row]:
+    return conn.execute('SELECT * FROM rounds ORDER BY started_at DESC LIMIT ?', (limit,)).fetchall()[::-1]
+
+
+def session_history(conn) -> list[sqlite3.Row]:
+    # 同一毫秒内连续轮换时 created_at 会相同,再按 rowid 兜底保证新的在前
+    return conn.execute('SELECT * FROM session_history ORDER BY created_at DESC, rowid DESC').fetchall()
 
 
 # ---- issues ----
