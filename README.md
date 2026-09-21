@@ -48,6 +48,17 @@ loginctl enable-linger $USER
       └── notes/                        问题归档
 ```
 
+## 权限:第一天之后就换掉
+
+模板里的 `permission_args = ["--dangerously-skip-permissions"]` 只适合关起门来跑通,因为它
+**连工作台 settings.json 的 deny 清单一起绕过**,而群消息是不可信输入。跑通后改成:
+
+```toml
+permission_args = ["--permission-mode", "dontAsk", "--permission-prompts", "none"]
+```
+
+无头模式下未预批的调用直接被拒、不会挂住;拒绝会记日志,按日志补 allow 清单。
+
 ## 日常运维
 
 ```bash
