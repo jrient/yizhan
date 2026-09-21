@@ -18,8 +18,10 @@ log = logging.getLogger('yizhan.listener')
 
 
 def trigger_dispatcher(inst: str):
+    # --no-block 是必须的:dispatcher 是 oneshot,不加会一直等到它处理完整轮卡
+    # (实测 2026-09-21:收到第一条消息就卡了 10 秒超时,期间收不了新事件)。
     try:
-        subprocess.run(['systemctl', '--user', 'start', f'yizhan-dispatcher@{inst}.service'],
+        subprocess.run(['systemctl', '--user', '--no-block', 'start', f'yizhan-dispatcher@{inst}.service'],
                        check=False, capture_output=True, timeout=10)
     except Exception as e:
         log.warning('拉起 dispatcher 失败: %s', e)

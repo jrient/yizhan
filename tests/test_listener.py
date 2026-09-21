@@ -64,3 +64,15 @@ def test_bot_added_alerts_unknown_chat(db, cfg):
     assert sent == []
     listener.handle_bot_added(db, cfg, C(), 'oc_group1')      # 白名单里的群不告警
     assert sent == []
+
+
+def test_trigger_uses_no_block(monkeypatch):
+    seen = {}
+    def fake_run(argv, **kw):
+        seen['argv'] = argv; seen['timeout'] = kw.get('timeout')
+        class R: pass
+        return R()
+    monkeypatch.setattr(listener.subprocess, 'run', fake_run)
+    listener.trigger_dispatcher('demo')
+    # oneshot 的 start 会阻塞到跑完,必须 --no-block,否则 listener 期间收不了事件
+    assert '--no-block' in seen['argv'] and seen['argv'][-1] == 'yizhan-dispatcher@demo.service'
