@@ -32,6 +32,26 @@ def workspace_skill_dir(paths, skill: str) -> Path:
     return paths.workspace / '.claude' / 'skills' / skill
 
 
+def trust_workspace(workspace: Path) -> bool:
+    """把工作台标成已信任。
+
+    不标的话 claude 会整个忽略 .claude/settings.json 的 allow/deny
+    (启动时打印 Ignoring N permissions.allow entries),阶段二切到
+    --permission-mode dontAsk 之后就变成什么都不许干(2026-09-21 实测)。
+    """
+    cfg_file = Path(os.path.expanduser('~/.claude.json'))
+    try:
+        data = json.loads(cfg_file.read_text(encoding='utf-8')) if cfg_file.exists() else {}
+    except Exception:
+        return False
+    proj = data.setdefault('projects', {}).setdefault(str(workspace), {})
+    if proj.get('hasTrustDialogAccepted') is True:
+        return False
+    proj['hasTrustDialogAccepted'] = True
+    cfg_file.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding='utf-8')
+    return True
+
+
 def _render(src: Path, dst: Path, mapping: dict[str, str]):
     text = src.read_text(encoding='utf-8')
     for k, v in mapping.items():
@@ -91,6 +111,8 @@ def cmd_init(a) -> int:
         _render(TEMPLATES / 'config.toml', paths.config_file, mapping)
         paths.config_file.chmod(0o600)
     conn = dbm.connect(paths.db_file); conn.close()
+    if trust_workspace(paths.workspace):
+        print('  已把工作台标为可信(否则 settings.json 的允许清单会被忽略)')
 
     print(f'实例 {a.inst} 已初始化({n} 个文件):')
     print(f'  配置    {paths.config_file}   ← 填 app_id / app_secret / alert_open_id / group_allow')

@@ -100,3 +100,16 @@ def test_sync_skill_refuses_without_yes(cfg, tmp_path, monkeypatch):
     except SystemExit as e:
         assert '--yes' in str(e)
     assert (repo / 'SKILL.md').read_text() == '仓库版'
+
+
+def test_init_marks_workspace_trusted(inst_env, tmp_path, monkeypatch):
+    """不标可信,claude 会忽略 settings.json 的整个 allow/deny 清单。"""
+    fake_home = tmp_path / 'home'; fake_home.mkdir()
+    monkeypatch.setenv('HOME', str(fake_home))
+    (fake_home / '.claude.json').write_text('{"projects": {}}')
+    proj = tmp_path / 'pt'; proj.mkdir()
+    cli.main(['init', 'trustme', '--project', str(proj)])
+    data = json.loads((fake_home / '.claude.json').read_text())
+    ws = str(Paths('trustme').workspace)
+    assert data['projects'][ws]['hasTrustDialogAccepted'] is True
+    assert cli.trust_workspace(Paths('trustme').workspace) is False   # 已标过就不重复写
