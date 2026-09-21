@@ -1,0 +1,305 @@
+/* ui-unify design tokens v1.7.0 — Linear dark + Supabase green, dual theme, multi-accent.
+ * 单份定义：颜色用 light-dark(浅色值, 深色值) 写一次，主题由 color-scheme 驱动。
+ *   :root 默认 `light dark` → 跟随系统；data-theme 手动覆盖只切 color-scheme（不重列变量）。
+ *   需 light-dark() 支持：Chrome/Edge 123、Safari 17.5、Firefox 120（Baseline 2024，内部后台工具足够）。
+ * 护眼浅色与 Linear 暗色：浅色采用暖灰底 #f2f1ec + 柔米白卡片 #faf9f6，消除粉刷白屏刺眼感；中性文字与阴影同步暖化。
+ *   纵深逻辑：深浅两主题统一保持 canvas < surface(卡片) < elevated(浮层) 逐层提亮模型。
+ *   边框半透明黑/白分档；品牌色亮暗双值（暗底提亮、浅底加深）。
+ * 对比度：主/次文字、强调、链接、状态色均实测 ≥ WCAG AA 4.5:1（见 references/contrast-audit.md）。
+ *   例外 --text-3 是最faint的「弱化/占位档」，实测约 2.4–3.4:1（低于 AA），仅用于占位符、分隔、
+ *   与主信息重复的辅助计数——不要用它承载必要正文。如需承载，改用 --text-2。 */
+:root {
+  color-scheme: light dark;               /* 关键：激活 light-dark() 并让表单控件跟随主题 */
+  --shadow-tint: light-dark(24 23 20, 0 0 0); /* 阴影染色基调：随色系变化 */
+
+  /* surfaces —— 分层提亮做纵深：canvas < surface(卡片) < elevated(浮层)。light-dark(浅, 深)
+   * 浅色方案：暖灰纸张画布 #f2f1ec + 柔米白卡片 #faf9f6 + 浮层 #fdfcfa，全程不出现纯白，大面积卡片/表格也不刺眼 */
+  --bg:        light-dark(#f2f1ec, #151517);
+  --surface:   light-dark(#faf9f6, #232324);
+  --surface-2: light-dark(#e8e6df, #2c2c2e);
+  --elevated:  light-dark(#fdfcfa, #353638);
+
+  /* borders —— 半透明分档：subtle(分隔线) < border(默认) < strong(输入控件) */
+  --border-subtle: light-dark(rgba(0,0,0,.06), rgba(255,255,255,.06));
+  --border:        light-dark(rgba(0,0,0,.11), rgba(255,255,255,.09));
+  --border-strong: light-dark(rgba(0,0,0,.18), rgba(255,255,255,.16));
+
+  /* text —— 浅色跟随暖色调，text-2 加深至 #5f5e58 以过 AA(叠在暖灰底与白卡片上均 ≥4.5:1) */
+  --text:   light-dark(#191816, #f7f8f8);
+  --text-2: light-dark(#5f5e58, #8a8f98);
+  --text-3: light-dark(#8e8c84, #62666d);   /* 弱化档(占位/分隔/计数)，目标 ≥2.4:1 */
+
+  /* accent —— 暗底亮绿、浅底深绿 */
+  --accent:          light-dark(#157a54, #3ecf8e);
+  --accent-hover:    light-dark(#126748, #34b27b);
+  --accent-ring:     light-dark(rgba(21,122,84,.2), rgba(62,207,142,.22));
+  --accent-contrast: light-dark(#ffffff, #0e0e10);      /* 实心绿按钮上的文字 */
+  --accent-text:     light-dark(#157a54, #3ecf8e);      /* 绿作文字/图标；浅色加深至 #157a54 过 AA */
+
+  /* semantic status —— 与强调绿刻意错开 */
+  --ok:     light-dark(#19734d, #34ae79);
+  --warn:   light-dark(#a34a06, #f5a623);
+  --danger: light-dark(#cb1840, #fb7185);
+  --idle:   light-dark(#6e6c65, #8a8f98);
+
+  /* typography —— 不引外网字体 */
+  --font-sans: Inter, -apple-system, "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", "Source Han Sans SC", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, "Noto Sans Mono CJK SC", monospace;
+
+  /* shape & density —— 嵌套圆角规则：inner = outer − 内边距（控件 6−2、卡片 8−4，均得 4）
+   * 所以紧贴容器内壁的子元素统一用 --radius-sm，避免内外弧线在角上打架。 */
+  --radius-sm: 4px;                       /* 嵌套子元素：菜单/命令项、kbd、分段按钮、行内代码… */
+  --radius: 6px;                          /* controls */
+  --radius-lg: calc(var(--radius) + 2px); /* cards = 8px */
+  --row-h: 36px;                          /* table row height */
+}
+
+
+/* --- 多色系支持 ---
+ * 三轴机制：
+ * 1. data-theme (明暗): 切 color-scheme，支持 light/dark/系统默认
+ * 2. data-palette (主题色系): 覆盖以下 10 个中性底色 token 及 --shadow-tint，改变画面基调
+ * 3. data-accent (强调色): 覆盖强调绿，改变按钮与状态高亮
+ * 这三个轴互相正交。默认无 data-palette 属性时，即为暖灰/柔米白的默认配色。 */
+/* Solarized: Ethan Schoonover. 精确控制明度关系，刻意降低对比度护眼。
+ * 调整：映射 base3>base2 至 canvas>surface 层级；微调 light text-2 满足对比度。 */
+:root[data-palette="solarized"] {
+  --bg:        light-dark(#fdf6e3, #002b36);
+  --surface:   light-dark(#fffdf5, #073642);
+  --surface-2: light-dark(#eee8d5, #113847);
+  --elevated:  light-dark(#fefdf8, #1b5b6b);
+  --border-subtle: light-dark(rgba(0,0,0,.06), rgba(238,232,213,.06));
+  --border:        light-dark(rgba(0,0,0,.11), rgba(238,232,213,.09));
+  --border-strong: light-dark(rgba(0,0,0,.18), rgba(238,232,213,.16));
+  --text:   light-dark(#002b36, #fdf6e3);
+  --text-2: light-dark(#5f747c, #93a1a1);
+  --text-3: light-dark(#93a1a1, #586e75);
+  --shadow-tint: light-dark(0 43 54, 0 0 0);
+}
+/* Everforest: sainnhe. 绿色基调护眼久看不累，低饱和。
+ * 调整：dark bg 提亮至 17% L 以满足明度下限；调偏色相以区分 solarized。 */
+:root[data-palette="everforest"] {
+  --bg:        light-dark(#eef3e3, #232a2e);
+  --surface:   light-dark(#f8faf4, #2d353b);
+  --surface-2: light-dark(#e6edd8, #343f44);
+  --elevated:  light-dark(#fbfcf9, #3d484d);
+  --border-subtle: light-dark(rgba(0,0,0,.06), rgba(211,198,170,.06));
+  --border:        light-dark(rgba(0,0,0,.11), rgba(211,198,170,.09));
+  --border-strong: light-dark(rgba(0,0,0,.18), rgba(211,198,170,.16));
+  --text:   light-dark(#3a4b54, #d3c6aa);
+  --text-2: light-dark(#5c6a72, #9da9a0);
+  --text-3: light-dark(#939f91, #859289);
+  --shadow-tint: light-dark(45 53 59, 0 0 0);
+}
+/* Nord: arcticicestudio. 北极/极夜意象，冷蓝灰，低对比柔和。
+ * 调整：light bg 加蓝以区分 catppuccin，dark bg 调暗至 13% L 以满足 4.5 对比度；映射 snow 阶以符合逐层提亮。 */
+:root[data-palette="nord"] {
+  --bg:        light-dark(#e7eef7, #1a2432);
+  --surface:   light-dark(#f6f8fb, #2e3440);
+  --surface-2: light-dark(#dbe4f0, #3b4252);
+  --elevated:  light-dark(#f9fbfc, #434c5e);
+  --border-subtle: light-dark(rgba(46,52,64,.06), rgba(236,239,244,.06));
+  --border:        light-dark(rgba(46,52,64,.11), rgba(236,239,244,.09));
+  --border-strong: light-dark(rgba(46,52,64,.18), rgba(236,239,244,.16));
+  --text:   light-dark(#2e3440, #eceff4);
+  --text-2: light-dark(#4c566a, #d8dee9);
+  --text-3: light-dark(#8794a9, #81a1c1);
+  --shadow-tint: light-dark(46 52 64, 0 0 0);
+}
+/* Catppuccin: 柔和粉彩，四档统一色相骨架。 */
+:root[data-palette="catppuccin"] {
+  --bg:        light-dark(#eff1f5, #201c32);
+  --surface:   light-dark(#f6f7fa, #26263a);
+  --surface-2: light-dark(#e6e9ef, #313244);
+  --elevated:  light-dark(#fafafc, #3d3e54);
+  --border-subtle: light-dark(rgba(76,79,105,.06), rgba(205,214,244,.06));
+  --border:        light-dark(rgba(76,79,105,.11), rgba(205,214,244,.09));
+  --border-strong: light-dark(rgba(76,79,105,.18), rgba(205,214,244,.16));
+  --text:   light-dark(#4c4f69, #cdd6f4);
+  --text-2: light-dark(#696b81, #a6adc8);
+  --text-3: light-dark(#989cad, #7f849c);
+  --shadow-tint: light-dark(76 79 105, 0 0 0);
+}
+/* Rosé Pine: 玫瑰灰紫，"all natural pine, faux fur and a bit of soho vibes"。
+ * 调整：base<surface<overlay 层级原生匹配本项目，仅微调 text 对比度。 */
+:root[data-palette="rose-pine"] {
+  --bg:        light-dark(#faf4ed, #191724);
+  --surface:   light-dark(#fffaf3, #1f1d2e);
+  --surface-2: light-dark(#f2e9e1, #26233a);
+  --elevated:  light-dark(#fefbf8, #312c4b);
+  --border-subtle: light-dark(rgba(25,23,36,.06), rgba(224,222,244,.06));
+  --border:        light-dark(rgba(25,23,36,.11), rgba(224,222,244,.09));
+  --border-strong: light-dark(rgba(25,23,36,.18), rgba(224,222,244,.16));
+  --text:   light-dark(#191724, #e0def4);
+  --text-2: light-dark(#706c8a, #908caa);
+  --text-3: light-dark(#9893a5, #6e6a86);
+  --shadow-tint: light-dark(25 23 36, 0 0 0);
+}
+
+/* Dracula: Zeno Rocha. 彩色/暗色兼具，紫粉调。
+ * 调整：暗色画布直接采用原值，浅色设计淡薰衣草紫底色搭档以满足护眼与辨识度。 */
+:root[data-palette="dracula"] {
+  --bg:        light-dark(#f6e9fc, #282a36);
+  --surface:   light-dark(#f9f3fc, #2e303e);
+  --surface-2: light-dark(#eed4fa, #353747);
+  --elevated:  light-dark(#fcf9fd, #3b3e50);
+  --border-subtle: light-dark(rgba(40,42,54,.06), rgba(255,255,255,.06));
+  --border:        light-dark(rgba(40,42,54,.11), rgba(255,255,255,.09));
+  --border-strong: light-dark(rgba(40,42,54,.18), rgba(255,255,255,.16));
+  --text:   light-dark(#282a36, #f7f7f2);
+  --text-2: light-dark(#3c18e5, #969ab2);
+  --text-3: light-dark(#6271a4, #6271a4);
+  --shadow-tint: light-dark(40 42 54, 0 0 0);
+}
+
+/* Tokyo Night (Storm): folke. 深沉冷色夜间。
+ * 调整：暗色画布明度微升至 19.2% 以满足对比度，浅色设计冷靛蓝底色。 */
+:root[data-palette="tokyo-night"] {
+  --bg:        light-dark(#e6eeff, #24283e);
+  --surface:   light-dark(#f1f5fe, #292e47);
+  --surface-2: light-dark(#cfdeff, #2f3451);
+  --elevated:  light-dark(#f8fafe, #343a5b);
+  --border-subtle: light-dark(rgba(36,40,62,.06), rgba(255,255,255,.06));
+  --border:        light-dark(rgba(36,40,62,.11), rgba(255,255,255,.09));
+  --border-strong: light-dark(rgba(36,40,62,.18), rgba(255,255,255,.16));
+  --text:   light-dark(#24273b, #c0caf5);
+  --text-2: light-dark(#595d70, #9098bf);
+  --text-3: light-dark(#898ea1, #59638f);
+  --shadow-tint: light-dark(36 40 62, 0 0 0);
+}
+
+/* One Dark: atom/navarasu. 经典代码编辑器深色。
+ * 调整：暗色为满足辨识距微推偏青绿，浅色设计淡青蓝底色搭档。 */
+:root[data-palette="one-dark"] {
+  --bg:        light-dark(#e4f6fb, #283234);
+  --surface:   light-dark(#f2fafc, #2c3739);
+  --surface-2: light-dark(#cff0f9, #303d3f);
+  --elevated:  light-dark(#f8fcfd, #354245);
+  --border-subtle: light-dark(rgba(40,50,52,.06), rgba(255,255,255,.06));
+  --border:        light-dark(rgba(40,50,52,.11), rgba(255,255,255,.09));
+  --border-strong: light-dark(rgba(40,50,52,.18), rgba(255,255,255,.16));
+  --text:   light-dark(#282c33, #c8cfdb);
+  --text-2: light-dark(#5a6268, #a2aab3);
+  --text-3: light-dark(#88949a, #6c757b);
+  --shadow-tint: light-dark(40 50 52, 0 0 0);
+}
+
+/* Monokai: Wimer Hazenberg. 经典高对比彩色。
+ * 调整：暗色画布直接采用原值，浅色设计淡黄绿底色以保证距离与护眼。 */
+:root[data-palette="monokai"] {
+  --bg:        light-dark(#f5fbe4, #272822);
+  --surface:   light-dark(#f9fcf2, #2f3029);
+  --surface-2: light-dark(#eef9cf, #373830);
+  --elevated:  light-dark(#fcfdf8, #3f4037);
+  --border-subtle: light-dark(rgba(39,40,34,.06), rgba(255,255,255,.06));
+  --border:        light-dark(rgba(39,40,34,.11), rgba(255,255,255,.09));
+  --border-strong: light-dark(rgba(39,40,34,.18), rgba(255,255,255,.16));
+  --text:   light-dark(#272821, #f7f7f2);
+  --text-2: light-dark(#636559, #999b8a);
+  --text-3: light-dark(#949788, #74705e);
+  --shadow-tint: light-dark(39 40 34, 0 0 0);
+}
+
+/* Gruvbox: morhetz. 复古暖色，减少蓝光。
+ * 调整：暗色微调偏移以腾挪空间，浅色直接采用原作极具特色的 #fbf1c7，实测护眼且达标。 */
+:root[data-palette="gruvbox"] {
+  --bg:        light-dark(#fbf1c7, #2b282a);
+  --surface:   light-dark(#f9f3d8, #322f31);
+  --surface-2: light-dark(#fbedb0, #3a3639);
+  --elevated:  light-dark(#f8f3e0, #423e41);
+  --border-subtle: light-dark(rgba(43,40,42,.06), rgba(255,255,255,.06));
+  --border:        light-dark(rgba(43,40,42,.11), rgba(255,255,255,.09));
+  --border-strong: light-dark(rgba(43,40,42,.18), rgba(255,255,255,.16));
+  --text:   light-dark(#3b3836, #ebdbb2);
+  --text-2: light-dark(#806808, #a1999f);
+  --text-3: light-dark(#928373, #6e635a);
+  --shadow-tint: light-dark(43 40 42, 0 0 0);
+}
+
+/* Ayu (Mirage): dempfi. 柔和深色。
+ * 调整：暗色为拉开与 One Dark 的距离微推偏青，浅色设计淡桃橙底色搭档。 */
+:root[data-palette="ayu"] {
+  --bg:        light-dark(#fbece4, #202c36);
+  --surface:   light-dark(#fcf5f2, #25333f);
+  --surface-2: light-dark(#f9decf, #2b3b49);
+  --elevated:  light-dark(#fdfaf8, #314352);
+  --border-subtle: light-dark(rgba(32,44,54,.06), rgba(255,255,255,.06));
+  --border:        light-dark(rgba(32,44,54,.11), rgba(255,255,255,.09));
+  --border-strong: light-dark(rgba(32,44,54,.18), rgba(255,255,255,.16));
+  --text:   light-dark(#414d59, #d9d7cd);
+  --text-2: light-dark(#575f69, #87a2b8);
+  --text-3: light-dark(#8e8f93, #5c6773);
+  --shadow-tint: light-dark(32 44 54, 0 0 0);
+}
+
+/* 绿色（默认）无需属性，其他强调色覆盖以下 5 个 token，确保中性底色不变。 */
+:root[data-accent="blue"] {
+  --accent:          light-dark(#0055cc, #78a9ff);
+  --accent-hover:    light-dark(#0044a3, #a6c8ff);
+  --accent-ring:     light-dark(rgba(0,85,204,.2), rgba(120,169,255,.22));
+  --accent-contrast: light-dark(#ffffff, #0e0e10);
+  --accent-text:     light-dark(#0055cc, #78a9ff);
+}
+:root[data-accent="violet"] {
+  --accent:          light-dark(#6d28d9, #a78bfa);
+  --accent-hover:    light-dark(#5b21b6, #c4b5fd);
+  --accent-ring:     light-dark(rgba(109,40,217,.2), rgba(167,139,250,.22));
+  --accent-contrast: light-dark(#ffffff, #0e0e10);
+  --accent-text:     light-dark(#6d28d9, #a78bfa);
+}
+:root[data-accent="teal"] {
+  --accent:          light-dark(#0d7680, #2dd4bf);
+  --accent-hover:    light-dark(#095c63, #5eead4);
+  --accent-ring:     light-dark(rgba(13,118,128,.2), rgba(45,212,191,.22));
+  --accent-contrast: light-dark(#ffffff, #0e0e10);
+  --accent-text:     light-dark(#0d7680, #2dd4bf);
+}
+:root[data-accent="amber"] {
+  --accent:          light-dark(#7a6200, #f5db5c);
+  --accent-hover:    light-dark(#634f00, #f9e68c);
+  --accent-ring:     light-dark(rgba(122,98,0,.2), rgba(245,219,92,.22));
+  --accent-contrast: light-dark(#ffffff, #0e0e10);
+  --accent-text:     light-dark(#7a6200, #f5db5c);
+}
+:root[data-accent="graphite"] {
+  --accent:          light-dark(#4f4d46, #a6a9b2);
+  --accent-hover:    light-dark(#3d3b35, #c3c6cd);
+  --accent-ring:     light-dark(rgba(79,77,70,.2), rgba(166,169,178,.22));
+  --accent-contrast: light-dark(#ffffff, #0e0e10);
+  --accent-text:     light-dark(#4f4d46, #a6a9b2);
+}
+
+/* 阴影不是颜色，light-dark() 不接受 → 保留极小的主题覆盖块。
+ * 卡片纵深：暗色=顶部内高光 bevel；浅色=暖调柔和投影。浮层柔和投影随主题深浅。 */
+:root {
+  --shadow-overlay: 0 1px 2px rgb(var(--shadow-tint) / 0.4), 0 16px 32px -12px rgb(var(--shadow-tint) / 0.55);
+  --card-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035);
+}
+@media (prefers-color-scheme: light) {
+  :root {
+    --shadow-overlay: 0 1px 2px rgb(var(--shadow-tint) / 0.06), 0 16px 32px -12px rgb(var(--shadow-tint) / 0.16);
+    --card-shadow: 0 1px 2px rgb(var(--shadow-tint) / 0.04), 0 2px 6px rgb(var(--shadow-tint) / 0.03);
+  }
+}
+:root[data-theme="dark"] {
+  --shadow-overlay: 0 1px 2px rgb(var(--shadow-tint) / 0.4), 0 16px 32px -12px rgb(var(--shadow-tint) / 0.55);
+  --card-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035);
+}
+:root[data-theme="light"] {
+  --shadow-overlay: 0 1px 2px rgb(var(--shadow-tint) / 0.06), 0 16px 32px -12px rgb(var(--shadow-tint) / 0.16);
+  --card-shadow: 0 1px 2px rgb(var(--shadow-tint) / 0.04), 0 2px 6px rgb(var(--shadow-tint) / 0.03);
+}
+
+/* 手动覆盖：只切 color-scheme，light-dark() 自动选值（无需重列所有变量） */
+:root[data-theme="light"] { color-scheme: light; }
+:root[data-theme="dark"]  { color-scheme: dark; }
+
+/* prefers-contrast: more —— 高对比偏好下加深边框与弱化文字 */
+@media (prefers-contrast: more) {
+  :root {
+    --border-subtle: light-dark(rgba(0,0,0,.12), rgba(255,255,255,.14));
+    --border:        light-dark(rgba(0,0,0,.22), rgba(255,255,255,.24));
+    --border-strong: light-dark(rgba(0,0,0,.34), rgba(255,255,255,.38));
+    --text-3:        light-dark(#5f5e58, #8a8f98);
+  }
+}

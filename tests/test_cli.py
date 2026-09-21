@@ -113,3 +113,33 @@ def test_init_marks_workspace_trusted(inst_env, tmp_path, monkeypatch):
     ws = str(Paths('trustme').workspace)
     assert data['projects'][ws]['hasTrustDialogAccepted'] is True
     assert cli.trust_workspace(Paths('trustme').workspace) is False   # 已标过就不重复写
+
+
+def test_web_init_writes_config_with_random_password(inst_env, capsys):
+    assert cli.main(['web-init', '--port', '8899']) == 0
+    from gateway.web import settings as ws
+    p = ws.default_path()
+    assert p.exists() and oct(p.stat().st_mode)[-3:] == '600'
+    s = ws.load(p)
+    assert s.port == 8899 and len(s.password) >= 12
+    out = capsys.readouterr().out
+    assert s.password in out and '只打印这一次' in out
+    try:
+        cli.main(['web-init'])
+        assert False, '重复生成应该拒绝'
+    except SystemExit as e:
+        assert '已存在' in str(e)
+    assert cli.main(['web-init', '--force']) == 0
+    assert ws.load(p).password != s.password
+
+
+def test_install_units_includes_web(inst_env, tmp_path, monkeypatch):
+    fake_home = tmp_path / 'h'; (fake_home / '.config' / 'systemd' / 'user').mkdir(parents=True)
+    monkeypatch.setenv('HOME', str(fake_home))
+    monkeypatch.setattr(cli.subprocess, 'run', lambda *a, **k: None)
+    cli.main(['install-units'])
+    names = {p.name for p in (fake_home / '.config' / 'systemd' / 'user').glob('yizhan-*')}
+    assert names == {'yizhan-listener@.service', 'yizhan-dispatcher@.service',
+                     'yizhan-dispatcher@.timer', 'yizhan-web.service'}
+    text = (fake_home / '.config' / 'systemd' / 'user' / 'yizhan-web.service').read_text()
+    assert '-m gateway.web' in text and '{repo}' not in text

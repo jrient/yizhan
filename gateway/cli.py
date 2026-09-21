@@ -227,6 +227,18 @@ def cmd_migrate(a) -> int:
     return 0
 
 
+def cmd_web_init(a) -> int:
+    from .web import settings as websettings
+    path = websettings.default_path()
+    if path.exists() and not a.force:
+        sys.exit(f'{path} 已存在。要重置口令加 --force')
+    path, pw = websettings.write_initial(path, port=a.port, host=a.host)
+    print(f'已生成 {path}\n  口令: {pw}   ← 只打印这一次,记下来\n  端口: {a.port}\n\n'
+          f'启动: systemctl --user enable --now yizhan-web\n'
+          f'访问: http://<本机地址>:{a.port}')
+    return 0
+
+
 def cmd_install_units(a) -> int:
     dst = Path(os.path.expanduser('~/.config/systemd/user'))
     dst.mkdir(parents=True, exist_ok=True)
@@ -263,6 +275,11 @@ def main(argv=None) -> int:
     s = sub.add_parser('status', help='看会话、心跳、卡与服务状态'); s.add_argument('inst'); s.set_defaults(fn=cmd_status)
     s = sub.add_parser('migrate', help='从旧 skill 目录导入成员名单'); s.add_argument('inst')
     s.add_argument('--from-dir', dest='from_dir', required=True); s.set_defaults(fn=cmd_migrate)
+    s = sub.add_parser('web-init', help='生成 Web 控制台的配置与随机口令')
+    s.add_argument('--port', type=int, default=8760)
+    s.add_argument('--host', default='0.0.0.0')
+    s.add_argument('--force', action='store_true', help='覆盖已有配置(会换口令)')
+    s.set_defaults(fn=cmd_web_init)
     s = sub.add_parser('install-units', help='把 systemd user 单元装到 ~/.config/systemd/user')
     s.set_defaults(fn=cmd_install_units)
     a = p.parse_args(argv)

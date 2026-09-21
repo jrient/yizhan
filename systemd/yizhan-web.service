@@ -1,0 +1,14 @@
+[Unit]
+Description=驿站 Web 控制台:实例管理与监控
+After=network-online.target
+
+[Service]
+Type=simple
+ExecStart={repo}/.venv/bin/python -m gateway.web
+Restart=always
+RestartSec=5
+Environment=TZ=Asia/Shanghai
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=default.target
