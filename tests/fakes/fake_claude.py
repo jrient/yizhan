@@ -1,0 +1,29 @@
+#!/usr/bin/env python3
+"""假 claude:按 FAKE_MODE 表现不同行为,供 runner / dispatcher 测试用。"""
+import json, os, sys, time
+
+mode = os.environ.get('FAKE_MODE', 'ok')
+argv = sys.argv[1:]
+# 记录调用,便于断言参数
+rec = os.environ.get('FAKE_RECORD')
+if rec:
+    with open(rec, 'a') as f:
+        f.write(json.dumps({'argv': argv, 'cwd': os.getcwd(),
+                            'has_claudecode': 'CLAUDECODE' in os.environ,
+                            'inst': os.environ.get('YIZHAN_INST')}) + '\n')
+
+if mode == 'resume_fail' and '--resume' in argv:
+    sys.stderr.write('No conversation found with session ID: x\n')
+    sys.exit(1)
+if mode == 'hang':
+    time.sleep(300)
+if mode == 'crash':
+    sys.stderr.write('boom\n'); sys.exit(2)
+
+hook = os.environ.get('FAKE_HOOK')
+if hook:
+    exec(open(hook).read(), {'argv': argv})
+
+print(json.dumps({'type': 'assistant', 'message': {'content': 'working'}}), flush=True)
+print(json.dumps({'type': 'result', 'subtype': 'success', 'is_error': False,
+                  'result': 'done', 'usage': {'input_tokens': 10, 'output_tokens': 2}}), flush=True)
