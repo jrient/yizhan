@@ -95,8 +95,8 @@ def test_defer_and_wake(ctx, capsys):
     assert fgctl.main(['defer', str(iid), '--until', '30m', '--note', '等张三批复']) == 0
     it = dbm.get_issue(ctx.db, iid)
     assert it['state'] == 'waiting' and it['defer_until'] > dbm.now_ms()
-    assert cards.wake_deferred(ctx.db, dbm.now_ms()) == []
-    assert cards.wake_deferred(ctx.db, it['defer_until']) == [iid]
+    assert cards.wake_deferred(ctx.db, dbm.now_ms()) == ([], [])
+    assert cards.wake_deferred(ctx.db, it['defer_until']) == ([iid], [])
 
 
 def test_pending_lists(ctx, capsys):
@@ -123,3 +123,23 @@ def test_thread_default_follows_config(ctx):
     assert ctx.client.sent[-1][3] is True
     fgctl.main(['reply', 'om_0', 'd', '--no-thread', *ev])
     assert ctx.client.sent[-1][3] is False
+
+
+def test_defer_counts_up(ctx, capsys):
+    iid = add_card(ctx)
+    fgctl.main(['defer', str(iid), '--until', '2h'])
+    assert dbm.get_issue(ctx.db, iid)['defer_count'] == 1
+    fgctl.main(['defer', str(iid), '--until', '2h'])
+    fgctl.main(['defer', str(iid), '--until', '2h'])
+    assert dbm.get_issue(ctx.db, iid)['defer_count'] == 3
+    assert '第 3 次挂起' in capsys.readouterr().out
+
+
+def test_card_shows_replies_before_messages(ctx, capsys):
+    """先看见自己说过什么,再看消息 —— 防重复回答。"""
+    iid = add_card(ctx)
+    fgctl.main(['reply', 'om_0', '答过了', '--type', 'other', '--evidence', '出处:群里 09-21 的公告原文'])
+    capsys.readouterr()
+    fgctl.main(['card', str(iid)])
+    out = capsys.readouterr().out
+    assert out.index('我方已经回过这张卡 1 条') < out.index('卡内消息')

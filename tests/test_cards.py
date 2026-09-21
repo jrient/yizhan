@@ -68,8 +68,8 @@ def test_answered_finish_and_defer_wake(db, cfg):
     cards.lock_card(db, cfg, iid, 'p', 2_000_000)
     dbm.update_issue(db, iid, state='waiting', defer_until=3_000_000)
     assert cards.finish_card(db, cfg, iid) == 'waiting'
-    assert cards.wake_deferred(db, 2_500_000) == []
-    assert cards.wake_deferred(db, 3_000_000) == [iid]
+    assert cards.wake_deferred(db, 2_500_000) == ([], [])
+    assert cards.wake_deferred(db, 3_000_000) == ([iid], [])
     assert dbm.get_issue(db, iid)['state'] == 'open'
 
 
@@ -99,3 +99,25 @@ def test_next_ready_at(db, cfg):
     assert cards.next_ready_at(db, cfg, 1_000_000) == 1_030_000     # 最后一条消息 + 30 秒
     dbm.update_issue(db, iid, defer_until=1_500_000)
     assert cards.next_ready_at(db, cfg, 1_000_000) == 1_500_000     # defer 更晚就听 defer
+
+
+def test_wake_marks_followup_and_caps_defers(db, cfg):
+    """挂起唤醒要打标记(提示词不同),且挂起次数封顶,否则会每隔两小时重复发言。"""
+    dbm.insert_event(db, ev('om_0', 1_000_000))
+    (iid,) = cards.assign_cards(db, cfg, 1_000_000)
+    dbm.update_issue(db, iid, state='waiting', defer_until=2_000_000, defer_count=1)
+    woke, exhausted = cards.wake_deferred(db, 2_000_000)
+    assert woke == [iid] and exhausted == []
+    it = dbm.get_issue(db, iid)
+    assert it['state'] == 'open' and cards.is_followup(it)
+
+    dbm.update_issue(db, iid, state='waiting', defer_until=3_000_000, defer_count=cards.MAX_DEFER)
+    woke, exhausted = cards.wake_deferred(db, 3_000_000)
+    assert woke == [] and exhausted == [iid]
+    assert dbm.get_issue(db, iid)['state'] == 'stuck'
+
+
+def test_fresh_card_is_not_followup(db, cfg):
+    dbm.insert_event(db, ev('om_0', 1_000_000))
+    (iid,) = cards.assign_cards(db, cfg, 1_000_000)
+    assert not cards.is_followup(dbm.get_issue(db, iid))

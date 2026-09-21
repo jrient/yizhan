@@ -121,13 +121,32 @@ def recover_stale(conn, cfg: Config) -> list[tuple[int, str]]:
     return out
 
 
-def wake_deferred(conn, now_ms: int) -> list[int]:
-    woke = []
+MAX_DEFER = 3
+
+
+def wake_deferred(conn, now_ms: int, max_defer: int = MAX_DEFER) -> tuple[list[int], list[int]]:
+    """defer 到点的卡回队列。返回 (醒来的, 挂起太多次被叫停的)。
+
+    挂起次数要封顶:卡 #8 在 2026-09-21 挂起 → 醒来 → 又答一遍 → 又挂起,
+    每两小时重复发言一次,没有尽头。
+    """
+    woke, exhausted = [], []
     for it in dbm.issues_by_state(conn, ['waiting']):
-        if it['defer_until'] is not None and int(it['defer_until']) <= now_ms:
-            dbm.update_issue(conn, int(it['issue_id']), state='open', defer_until=None)
-            woke.append(int(it['issue_id']))
-    return woke
+        if it['defer_until'] is None or int(it['defer_until']) > now_ms:
+            continue
+        iid = int(it['issue_id'])
+        if int(it['defer_count'] or 0) >= max_defer:
+            dbm.update_issue(conn, iid, state='stuck')
+            exhausted.append(iid)
+            continue
+        dbm.update_issue(conn, iid, state='open', defer_until=None, woke_from_defer=1)
+        woke.append(iid)
+    return woke, exhausted
+
+
+def is_followup(issue) -> bool:
+    """这一轮是 defer 醒来的复查,不是第一次接手。"""
+    return bool(issue['woke_from_defer'])
 
 
 def stale_open(conn, now_ms: int, minutes: int = 30) -> list[sqlite3.Row]:

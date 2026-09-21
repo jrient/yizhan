@@ -136,3 +136,46 @@ def test_does_not_wait_for_far_future_card(dcfg):
                                     msg_type='text', text='x', mentions=ME, mentions_me=True))
     conn.close()
     assert dispatcher.run_once(dcfg, client=FakeClient(), max_wait_sec=1) == 0   # 超过上限就交给 timer
+
+
+def _spawned_prompt(rec_file):
+    import json as _j
+    return ' '.join(_j.loads(rec_file.read_text().splitlines()[0])['argv'])
+
+
+def test_followup_card_gets_different_prompt(dcfg, tmp_path):
+    """defer 醒来的卡必须换提示词,否则会把已经答过的问题再答一遍(2026-09-21 卡 #8)。"""
+    conn = dbm.connect(dcfg.paths.db_file)
+    seed(conn, dcfg)
+    cards.assign_cards(conn, dcfg, dbm.now_ms())
+    dbm.insert_reply(conn, 1, 'om_0', 'om_me', 'reply', 'other', '证据' * 8, '之前答过的话')
+    dbm.update_issue(conn, 1, state='waiting', defer_until=dbm.now_ms() - 1000, defer_count=1)
+    conn.close()
+    dispatcher.run_once(dcfg, client=FakeClient(), max_cards=1)
+    prompt = _spawned_prompt(tmp_path / 'rec.jsonl')
+    assert '复查问题卡 #1' in prompt and '这不是新问题' in prompt
+    assert '你已经回过 1 条' in prompt and '什么都不要发' in prompt
+    assert '按六步处理' not in prompt
+    conn = dbm.connect(dcfg.paths.db_file)
+    assert dbm.get_issue(conn, 1)['woke_from_defer'] == 0      # 标记用完即清
+
+
+def test_normal_card_keeps_original_prompt(dcfg, tmp_path):
+    conn = dbm.connect(dcfg.paths.db_file); seed(conn, dcfg); conn.close()
+    dispatcher.run_once(dcfg, client=FakeClient(), max_cards=1)
+    prompt = _spawned_prompt(tmp_path / 'rec.jsonl')
+    assert '处理问题卡 #1' in prompt and '按六步处理' in prompt and '复查' not in prompt
+
+
+def test_defer_exhausted_alerts(dcfg):
+    conn = dbm.connect(dcfg.paths.db_file)
+    seed(conn, dcfg)
+    cards.assign_cards(conn, dcfg, dbm.now_ms())
+    dbm.update_issue(conn, 1, state='waiting', defer_until=dbm.now_ms() - 1000,
+                     defer_count=cards.MAX_DEFER)
+    conn.close()
+    c = FakeClient()
+    dispatcher.run_once(dcfg, client=c, max_cards=1)
+    assert any('挂起' in t and 'stuck' in t for t in c.texts)
+    conn = dbm.connect(dcfg.paths.db_file)
+    assert dbm.get_issue(conn, 1)['state'] == 'stuck'

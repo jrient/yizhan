@@ -61,7 +61,9 @@ CREATE TABLE IF NOT EXISTS issues (
   locked_at    INTEGER,
   last_read_at INTEGER,
   redispatch   INTEGER DEFAULT 0,
+  defer_count  INTEGER DEFAULT 0,
   defer_until  INTEGER,
+  woke_from_defer INTEGER DEFAULT 0,
   note         TEXT
 );
 CREATE INDEX IF NOT EXISTS ix_issues_state ON issues(state, created_at);
@@ -127,6 +129,14 @@ def now_ms() -> int:
     return int(time.time() * 1000)
 
 
+def _migrate(conn):
+    """给已经在跑的库补新列。"""
+    have = {r[1] for r in conn.execute('PRAGMA table_info(issues)')}
+    for col, ddl in (('defer_count', 'INTEGER DEFAULT 0'), ('woke_from_defer', 'INTEGER DEFAULT 0')):
+        if col not in have:
+            conn.execute(f'ALTER TABLE issues ADD COLUMN {col} {ddl}')
+
+
 def connect(path: str | Path) -> sqlite3.Connection:
     Path(path).parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(path), timeout=30, isolation_level=None)
@@ -134,6 +144,7 @@ def connect(path: str | Path) -> sqlite3.Connection:
     conn.execute('PRAGMA journal_mode=WAL')
     conn.execute('PRAGMA busy_timeout=30000')
     conn.executescript(SCHEMA)
+    _migrate(conn)
     return conn
 
 
