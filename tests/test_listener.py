@@ -76,3 +76,17 @@ def test_trigger_uses_no_block(monkeypatch):
     listener.trigger_dispatcher('demo')
     # oneshot 的 start 会阻塞到跑完,必须 --no-block,否则 listener 期间收不了事件
     assert '--no-block' in seen['argv'] and seen['argv'][-1] == 'yizhan-dispatcher@demo.service'
+
+
+def test_heartbeat_ticks_without_messages(cfg, db, monkeypatch):
+    """群里安静时也要打心跳,否则 watchdog 会误判 listener 死了并重启它。"""
+    import threading
+    dbm.heartbeat_touch(db, 1000)
+    stop = threading.Event()
+    _, t = listener.start_heartbeat(cfg.paths.db_file, stop, period=0.02)
+    for _ in range(100):
+        if dbm.heartbeat_get(db) > 1000:
+            break
+        __import__('time').sleep(0.02)
+    stop.set(); t.join(timeout=2)
+    assert dbm.heartbeat_get(db) > 1000

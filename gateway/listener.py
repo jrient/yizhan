@@ -8,6 +8,8 @@ from __future__ import annotations
 import logging
 import subprocess
 import sys
+import threading
+import time
 
 from . import config as configmod, db as dbm
 from .alerts import alert
@@ -15,6 +17,34 @@ from .events import EventRow, from_api_item, from_ws_event
 from .feishu import FeishuClient, FeishuError
 
 log = logging.getLogger('yizhan.listener')
+
+
+HEARTBEAT_SECONDS = 60
+
+
+def start_heartbeat(db_file, stop: threading.Event | None = None, period: float = HEARTBEAT_SECONDS):
+    """定期打心跳。
+
+    只在收到消息时打是不够的:群里安静十分钟,dispatcher 的 watchdog 就当 listener 死了,
+    发告警并重启一个本来好好的进程(2026-09-21 14:07 实测发生过)。
+    线程自己开一条连接 —— sqlite 的连接默认不许跨线程用。
+    """
+    stop = stop or threading.Event()
+
+    def beat():
+        conn = dbm.connect(db_file)
+        try:
+            while not stop.wait(period):
+                try:
+                    dbm.heartbeat_touch(conn)
+                except Exception as e:
+                    log.warning('心跳写入失败: %s', e)
+        finally:
+            conn.close()
+
+    t = threading.Thread(target=beat, name='heartbeat', daemon=True)
+    t.start()
+    return stop, t
 
 
 def trigger_dispatcher(inst: str):
@@ -101,6 +131,7 @@ def main(argv=None) -> int:
     bot = client.bot_open_id()
     log.info('bot open_id=%s;群白名单=%s', bot, cfg.group_allow)
     dbm.heartbeat_touch(conn)
+    start_heartbeat(cfg.paths.db_file)
     backfill(conn, cfg, client, bot)
 
     import lark_oapi as lark
