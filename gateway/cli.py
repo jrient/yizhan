@@ -159,12 +159,28 @@ def cmd_rotate(a) -> int:
     return 0
 
 
-def cmd_pause(a) -> int:
-    cfg = configmod.load(a.inst)
+def pause(inst: str) -> str:
+    """停 timer 并落 paused 文件。web 与命令行共用这一份。"""
+    cfg = configmod.load(inst)
     cfg.paths.ensure()
     cfg.paths.paused_file.write_text('paused\n')
-    subprocess.run(['systemctl', '--user', 'stop', f'yizhan-dispatcher@{a.inst}.timer'], check=False)
+    subprocess.run(['systemctl', '--user', 'stop', f'yizhan-dispatcher@{inst}.timer'],
+                   check=False, capture_output=True, timeout=20)
     s = dbm.session_get(dbm.connect(cfg.paths.db_file))
+    return s['session_id'] if s else ''
+
+
+def resume(inst: str):
+    cfg = configmod.load(inst)
+    cfg.paths.paused_file.unlink(missing_ok=True)
+    subprocess.run(['systemctl', '--user', 'start', f'yizhan-dispatcher@{inst}.timer'],
+                   check=False, capture_output=True, timeout=20)
+
+
+def cmd_pause(a) -> int:
+    cfg = configmod.load(a.inst)
+    sid = pause(a.inst)
+    s = {'session_id': sid} if sid else None
     print(f'已暂停 {a.inst}。现在可以在终端接管这个会话:\n'
           f'  cd {cfg.paths.workspace} && claude --resume {s["session_id"] if s else "(还没有会话)"}\n'
           f'恢复: yizhan resume {a.inst}')
@@ -172,9 +188,7 @@ def cmd_pause(a) -> int:
 
 
 def cmd_resume(a) -> int:
-    cfg = configmod.load(a.inst)
-    cfg.paths.paused_file.unlink(missing_ok=True)
-    subprocess.run(['systemctl', '--user', 'start', f'yizhan-dispatcher@{a.inst}.timer'], check=False)
+    resume(a.inst)
     print(f'已恢复 {a.inst}')
     return 0
 
