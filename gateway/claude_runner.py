@@ -45,6 +45,7 @@ def build_env(cfg, extra: dict[str, str] | None = None) -> dict[str, str]:
     env['YIZHAN_INST'] = cfg.inst
     env.setdefault('HOME', os.path.expanduser('~'))
     env['PATH'] = os.path.dirname(cfg.claude_bin) + os.pathsep + env.get('PATH', '/usr/bin:/bin')
+    env.update(getattr(cfg, 'claude_env', None) or {})
     if extra:
         env.update(extra)
     return env

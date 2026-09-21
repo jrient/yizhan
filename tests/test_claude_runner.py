@@ -93,3 +93,12 @@ def test_context_tokens_takes_max_not_sum():
 def test_run_reports_context_tokens(fcfg, tmp_path):
     r = run(fcfg, tmp_path)
     assert r.context_tokens == 40
+
+
+def test_claude_env_injected(fcfg, tmp_path, monkeypatch):
+    """systemd 下没有 shell 的代理变量,claude 会 403,所以配置里的 env 必须传进子进程。"""
+    fcfg.claude_env = {'https_proxy': 'http://127.0.0.1:7890'}
+    env = cr.build_env(fcfg)
+    assert env['https_proxy'] == 'http://127.0.0.1:7890'
+    assert env['TZ'] == 'Asia/Shanghai' and env['YIZHAN_INST'] == 'demo'
+    assert 'CLAUDECODE' not in env

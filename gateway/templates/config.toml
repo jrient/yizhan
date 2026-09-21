@@ -23,3 +23,12 @@ hard_timeout_min = 60
 #   permission_args = ["--permission-mode", "dontAsk", "--permission-prompts", "none"]
 permission_args = ["--dangerously-skip-permissions"]
 rotate_at_tokens = 0      # >0 时上下文超过这么多 token 就主动换新会话(兜底,默认依赖自动压缩)
+
+# 回复是否开话题。true:追问天然并进同一张卡;false:平铺回复,靠(会话,发起人)+10 分钟窗口归并
+reply_in_thread = true
+
+# 给 claude 子进程补的环境变量。这台机器上 claude 要走本地代理,不给就是
+# 403 Request not allowed —— systemd 服务里没有 shell 的代理变量,必须写在这。
+[claude_env]
+# https_proxy = "http://127.0.0.1:7890"
+# http_proxy = "http://127.0.0.1:7890"

@@ -34,6 +34,12 @@ class Config:
     # 兜底:主会话上下文超过这么多 token 就主动轮换。0 = 关(依赖 CLI 自带的自动压缩)。
     # 09-21 的自动压缩实验没跑到 100k 阈值,结论未定,所以留这个开关。
     rotate_at_tokens: int = 0
+    # 给 claude 子进程补的环境变量。这台机器上 claude 必须走本地代理,否则报
+    # 403 Request not allowed(2026-09-21 实测);systemd 服务没有这些变量,必须显式给。
+    # 注意飞书接口不走代理(FeishuClient 关了 trust_env)。
+    claude_env: dict = field(default_factory=dict)
+    # 回复是否开话题。开=追问天然并进同一张卡;关=靠(会话,发起人)+10 分钟窗口归并。
+    reply_in_thread: bool = True
     paths: Paths = field(default=None, repr=False)  # type: ignore[assignment]
 
     REQUIRED = ('app_id', 'app_secret', 'project_dir')

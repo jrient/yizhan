@@ -108,3 +108,18 @@ def test_pending_lists(ctx, capsys):
 def test_send_needs_evidence_too(ctx):
     with pytest.raises(SystemExit):
         fgctl.main(['send', 'oc_group1', '通报', '--type', 'other'])
+
+
+def test_thread_default_follows_config(ctx):
+    add_card(ctx)
+    ev = ['--type', 'other', '--evidence', '出处:群里 09-21 的部署公告原文']
+    ctx.cfg.reply_in_thread = False
+    fgctl.main(['reply', 'om_0', 'a', *ev])
+    assert ctx.client.sent[-1][3] is False
+    fgctl.main(['reply', 'om_0', 'b', '--thread', *ev])      # 显式覆盖
+    assert ctx.client.sent[-1][3] is True
+    ctx.cfg.reply_in_thread = True
+    fgctl.main(['reply', 'om_0', 'c', *ev])
+    assert ctx.client.sent[-1][3] is True
+    fgctl.main(['reply', 'om_0', 'd', '--no-thread', *ev])
+    assert ctx.client.sent[-1][3] is False

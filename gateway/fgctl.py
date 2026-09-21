@@ -126,6 +126,15 @@ def cmd_pending(ctx: Ctx, a):
 
 
 # ---- 写:发言 ----
+def _want_thread(ctx: Ctx, a) -> bool:
+    """开不开话题:命令行显式给的优先,否则听配置 reply_in_thread。"""
+    if getattr(a, 'thread', False):
+        return True
+    if getattr(a, 'no_thread', False):
+        return False
+    return bool(ctx.cfg.reply_in_thread)
+
+
 def _resolve_issue(ctx: Ctx, mid: str):
     it = dbm.issue_for_message(ctx.db, mid)
     return int(it['issue_id']) if it else None
@@ -152,7 +161,7 @@ def _after_send(ctx: Ctx, *, issue_id, to_mid, my_mid, via, kind, ev, text, in_t
 def cmd_reply(ctx: Ctx, a):
     kind, ev = check(a.type, a.evidence, a.text)
     content = post_content(a.text, ctx.members)
-    in_thread = not a.no_thread
+    in_thread = _want_thread(ctx, a)
     mid = ctx.client.reply_post(a.message_id, content, in_thread=in_thread)
     _after_send(ctx, issue_id=_resolve_issue(ctx, a.message_id), to_mid=a.message_id, my_mid=mid,
                 via='reply', kind=kind, ev=ev, text=a.text, in_thread=in_thread)
@@ -163,7 +172,7 @@ def cmd_replycode(ctx: Ctx, a):
     kind, ev = check(a.type, a.evidence, a.lead)
     body = Path(a.file).read_text(encoding='utf-8')
     content = code_post_content(a.lead, body, ctx.members, a.language)
-    in_thread = not a.no_thread
+    in_thread = _want_thread(ctx, a)
     mid = ctx.client.reply_post(a.message_id, content, in_thread=in_thread)
     _after_send(ctx, issue_id=_resolve_issue(ctx, a.message_id), to_mid=a.message_id, my_mid=mid,
                 via='replycode', kind=kind, ev=ev, text=f'{a.lead} :: {a.file}', in_thread=in_thread)
@@ -291,12 +300,15 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument('--limit', type=int, default=50); s.add_argument('--thread'); s.set_defaults(fn=cmd_context)
     s = sub.add_parser('pending', help='待办卡列表'); s.set_defaults(fn=cmd_pending)
 
-    s = sub.add_parser('reply', help='回到某条消息下面(默认开话题)')
-    s.add_argument('message_id'); s.add_argument('text'); s.add_argument('--no-thread', action='store_true')
+    s = sub.add_parser('reply', help='回到某条消息下面(开不开话题看配置 reply_in_thread)')
+    s.add_argument('message_id'); s.add_argument('text')
+    s.add_argument('--thread', action='store_true', help='强制开话题')
+    s.add_argument('--no-thread', action='store_true', help='强制不开话题')
     ev_args(s); s.set_defaults(fn=cmd_reply)
     s = sub.add_parser('replycode', help='回复:一行引导语 + 代码块附件')
     s.add_argument('message_id'); s.add_argument('lead'); s.add_argument('file')
-    s.add_argument('--language', default='PLAIN'); s.add_argument('--no-thread', action='store_true')
+    s.add_argument('--language', default='PLAIN')
+    s.add_argument('--thread', action='store_true'); s.add_argument('--no-thread', action='store_true')
     ev_args(s); s.set_defaults(fn=cmd_replycode)
     s = sub.add_parser('send', help='往群里新发一条(通报用;回答问题请用 reply)')
     s.add_argument('chat_id'); s.add_argument('text'); s.add_argument('--issue', type=int)
