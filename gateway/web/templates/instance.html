@@ -1,3 +1,44 @@
-<!doctype html><meta charset="utf-8"><title>{{ inst }}</title>
-<h1>{{ inst }}</h1><p>{{ summary.health }} · {{ summary.health_reason }}</p>
-<p>页签:{{ tab }}</p>
+{% extends "base.html" %}
+{% block content %}
+<div class="ui-card mb-4">
+  <div class="row" style="justify-content:space-between;">
+    <div>
+      <h1 class="row" style="margin:0; font-size: 20px; gap:8px;">
+        {{ inst }}
+        <span class="ui-badge {% if summary.health == 'green' %}ok{% elif summary.health == 'yellow' %}warn{% elif summary.health == 'red' %}danger{% else %}idle{% endif %}">
+          <span class="ui-dot"></span>
+          {{ summary.health_reason }}
+        </span>
+      </h1>
+      <p class="ui-muted mt-4 mb-4" style="font-size:13px;">项目目录: <span class="ui-mono">{{ summary.project_dir }}</span></p>
+    </div>
+    <div class="row">
+      <button class="ui-btn" onclick="apiAction('{{inst}}', '{{ "resume" if summary.paused else "pause" }}').then(()=>location.reload())">{{ "恢复" if summary.paused else "暂停" }}</button>
+      <button class="ui-btn" onclick="apiAction('{{inst}}', 'restart-listener')">重启监听</button>
+      <button class="ui-btn" onclick="apiAction('{{inst}}', 'rotate')">轮换会话</button>
+      <button class="ui-btn primary" onclick="apiAction('{{inst}}', 'dispatch-now')">立即派一轮</button>
+    </div>
+  </div>
+</div>
+
+<div class="ui-tabs mb-4" id="inst-tabs">
+  <button class="ui-tab {% if tab == 'overview' %}active{% endif %}" onclick="switchTab('overview')">概览</button>
+  <button class="ui-tab {% if tab == 'cards' %}active{% endif %}" onclick="switchTab('cards')">卡</button>
+  <button class="ui-tab {% if tab == 'session' %}active{% endif %}" onclick="switchTab('session')">会话</button>
+  <button class="ui-tab {% if tab == 'logs' %}active{% endif %}" onclick="switchTab('logs')">日志</button>
+  <button class="ui-tab {% if tab == 'config' %}active{% endif %}" onclick="switchTab('config')">配置</button>
+</div>
+
+<div id="tab-content">
+  <!-- 内容将通过 JS 渲染 -->
+</div>
+
+<script>
+  window.INST = "{{ inst }}";
+  window.CSRF_TOKEN = "{{ csrf }}";
+  window.STREAMS = {{ streams | tojson | safe }};
+  
+  // app.js 带 defer,要等它执行完才有 switchTab(2026-09-21 实测:直接调会 ReferenceError)
+  document.addEventListener('DOMContentLoaded', () => switchTab("{{ tab }}"));
+</script>
+{% endblock %}

@@ -175,3 +175,30 @@ def test_attachment_path_rejects_traversal(cfg):
     assert data.attachment_path('demo', 'img_v3_ab-1.png').name == 'img_v3_ab-1.png'
     with pytest.raises(ValueError):
         data.attachment_path('demo', '../..')
+
+
+def test_timer_next_falls_back_to_monotonic(cfg, monkeypatch):
+    """相对定时器只填单调时钟字段,实时字段是空的。"""
+    import time as _t
+    def fake(args, timeout=10):
+        if args[0] == 'show' and 'timer' in args[1]:
+            up = float(open('/proc/uptime').read().split()[0])
+            soon = int((up + 30) * 1e6)
+            return 0, f'NextElapseUSecRealtime=\nNextElapseUSecMonotonic={soon}'
+        return 0, 'active'
+    monkeypatch.setattr(data, 'run_systemctl', fake)
+    out = data.timer_next('demo')
+    assert out and len(out) == 8            # HH:MM:SS
+
+
+def test_timer_next_none_when_infinity(cfg, monkeypatch):
+    monkeypatch.setattr(data, 'run_systemctl',
+                        lambda args, timeout=10: (0, 'NextElapseUSecRealtime=\nNextElapseUSecMonotonic=infinity'))
+    assert data.timer_next('demo') is None
+
+
+def test_overview_reports_dispatcher_active(cfg, db, monkeypatch):
+    monkeypatch.setattr(data, 'run_systemctl',
+                        lambda args, timeout=10: (0, 'activating') if args[0] == 'is-active' else (0, ''))
+    o = data.overview('demo')
+    assert o['dispatcher_active'] is True and o['timer_next'] is None

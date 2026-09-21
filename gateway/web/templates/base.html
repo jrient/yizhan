@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>驿站控制台</title>
+<link rel="stylesheet" href="/static/tokens.css">
+<link rel="stylesheet" href="/static/base.css">
+<link rel="stylesheet" href="/static/uplot.min.css">
+<link rel="stylesheet" href="/static/app.css">
+<script src="/static/htmx.min.js"></script>
+<script src="/static/htmx-ext-sse.js"></script>
+<script src="/static/uplot.min.js"></script>
+<script src="/static/app.js" defer></script>
+</head>
+<body class="ui" hx-ext="sse">
+<div class="ui-shell">
+  <!-- 侧边栏 -->
+  <aside class="ui-sidebar">
+    <div class="brand"><span class="mark">驿</span>驿站</div>
+    <div class="ui-nav-label">导航</div>
+    <a class="ui-nav-item {% if request.url.path == '/' %}active{% endif %}" href="/"><span class="icon">▤</span>实例列表</a>
+    <a class="ui-nav-item {% if request.url.path == '/new' %}active{% endif %}" href="/new"><span class="icon">＋</span>新建实例</a>
+    
+    <div class="ui-nav-label" style="margin-top:auto">系统</div>
+    <a class="ui-nav-item" href="#" onclick="event.preventDefault(); document.getElementById('logout-form').submit();"><span class="icon">◐</span>退出登录</a>
+    <form id="logout-form" action="/logout" method="POST" style="display:none;">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+    </form>
+  </aside>
+
+  <!-- 内容 -->
+  <div class="ui-content">
+    <header class="ui-topbar" style="justify-content: flex-end;">
+      <div class="ui-seg" id="theme-seg">
+        <button data-theme="light" onclick="setTheme('light')">浅色</button>
+        <button data-theme="dark" onclick="setTheme('dark')">深色</button>
+        <button data-theme="" onclick="setTheme(null)" class="active">跟随系统</button>
+      </div>
+    </header>
+
+    <div class="body">
+      {% block content %}{% endblock %}
+    </div>
+  </div>
+</div>
+
+<!-- toast 通知 -->
+<div class="ui-toast-stack" id="toast-container"></div>
+</body>
+</html>

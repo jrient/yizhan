@@ -1,4 +1,14 @@
-<!doctype html><meta charset="utf-8"><title>驿站</title>
-<h1>实例</h1>
-<ul>{% for i in instances %}<li><a href="/i/{{ i.inst }}">{{ i.inst }}</a> {{ i.health }} {{ i.health_reason }}</li>{% endfor %}</ul>
-<a href="/new">新建实例</a>
+{% extends "base.html" %}
+{% block content %}
+<div class="row" style="justify-content:space-between; margin-bottom: 20px;">
+  <h1 style="margin: 0; font-size: 20px; font-weight: 600;">实例列表</h1>
+  <a href="/new" class="ui-btn primary">＋ 新建实例</a>
+</div>
+
+<div id="instances-wall" class="grid-3"></div>
+
+<script>
+  window.INITIAL_INSTANCES = {{ instances | tojson | safe }};
+  window.CSRF_TOKEN = "{{ csrf }}";
+</script>
+{% endblock %}

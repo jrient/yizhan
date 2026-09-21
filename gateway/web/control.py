@@ -4,6 +4,7 @@ web 是 toml 的唯一写入方(listener 与 dispatcher 只读),进程内加锁�
 """
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
@@ -136,12 +137,28 @@ def _coerce(name: str, kind: str, raw):
     if kind == 'table':
         if isinstance(raw, dict):
             return {str(k): str(v) for k, v in raw.items() if str(k).strip()}
+        text = str(raw).strip()
+        if text.startswith('['):
+            raise ValueError('要填一个对象,形如 {"https_proxy": "http://…"},不是数组')
+        if text.startswith('{'):
+            # 配置页把 table 渲染成 JSON,这里必须认。不认的话保存一次就把
+            # claude_env 清空,claude 立刻没代理变 403(2026-09-21 截图时发现)。
+            try:
+                obj = json.loads(text)
+            except ValueError as e:
+                raise ValueError(f'不是合法的 JSON: {e}') from e
+            if not isinstance(obj, dict):
+                raise ValueError('要填一个对象,形如 {"https_proxy": "http://…"}')
+            return {str(k): str(v) for k, v in obj.items() if str(k).strip()}
         out = {}
-        for line in str(raw).split('\n'):
+        for line in text.split('\n'):
             if '=' in line:
                 k, v = line.split('=', 1)
                 if k.strip():
                     out[k.strip()] = v.strip().strip('"').strip("'")
+        if text and not out:
+            # 静默变成空表比报错更糟:claude_env 一空,claude 就没代理了
+            raise ValueError('看不懂,用 JSON 对象或每行一条 key = value')
         return out
     return str(raw).strip()
 

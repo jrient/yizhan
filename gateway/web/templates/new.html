@@ -1,1 +1,134 @@
-<!doctype html><meta charset="utf-8"><title>新建实例</title><h1>新建实例</h1>
+{% extends "base.html" %}
+{% block content %}
+<h1 style="margin: 0 0 20px; font-size: 20px; font-weight: 600;">新建实例</h1>
+
+<div class="ui-card mb-4" id="step1-card">
+  <p class="sec-label mb-4">第一步：基础信息</p>
+  <form id="step1-form" onsubmit="submitStep1(event)">
+    <div class="grid-2 mb-4">
+      <div class="field"><label>实例名称</label><input name="inst" class="ui-input" required placeholder="如 my-bot"></div>
+      <div class="field"><label>项目目录</label><input name="project_dir" class="ui-input" required placeholder="绝对路径"></div>
+      <div class="field"><label>技能 (可选)</label><input name="skill" class="ui-input" placeholder="如果不填则默认为空"></div>
+    </div>
+    <div id="step1-err" class="ui-muted" style="color:var(--danger); margin-bottom:12px;"></div>
+    <button type="submit" class="ui-btn primary">下一步</button>
+  </form>
+</div>
+
+<div class="ui-card mb-4" id="step2-card" style="display:none; opacity:0.5; pointer-events:none;">
+  <p class="sec-label mb-4">第二步：凭证与白名单配置</p>
+  <p class="ui-muted mb-4" style="font-size:13px;">请填写入下凭证。如何获取您的 open_id：把机器人拉进群并 @ 它发送任意消息，稍后在日志中查看。</p>
+  
+  <form id="step2-form" onsubmit="submitStep2(event)">
+    <input type="hidden" name="inst" id="step2-inst">
+    <div class="grid-2 mb-4" id="step2-fields">
+      {% for f in fields %}
+        {% if f.name in ['app_id', 'app_secret', 'alert_open_id', 'p2p_allow', 'group_allow', 'claude_env'] %}
+        <div class="field">
+          <label>{{ f.desc }} ({{ f.name }})</label>
+          <input name="{{ f.name }}" class="ui-input" required>
+        </div>
+        {% endif %}
+      {% endfor %}
+    </div>
+    <div id="step2-results" class="mb-4" style="display:none; gap: 8px; flex-direction:column;"></div>
+    <div class="row">
+      <button type="button" class="ui-btn" onclick="backToStep1()">上一步</button>
+      <button type="submit" class="ui-btn primary">验证并保存</button>
+    </div>
+  </form>
+</div>
+
+<div class="ui-card" id="step3-card" style="display:none; opacity:0.5; pointer-events:none;">
+  <p class="sec-label mb-4">第三步：启用</p>
+  <p>所有检查已通过，可以正式启用该实例。</p>
+  <button class="ui-btn primary mt-4" onclick="enableInst()">启用实例</button>
+</div>
+
+<script>
+  window.CSRF_TOKEN = "{{ csrf }}";
+  let currentInst = "";
+  
+  async function submitStep1(e) {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    fd.append('csrf', CSRF_TOKEN);
+    const res = await fetch('/api/new/init', { method: 'POST', body: fd });
+    const json = await res.json();
+    if (res.ok) {
+      currentInst = fd.get('inst');
+      document.getElementById('step2-inst').value = currentInst;
+      document.getElementById('step1-card').style.opacity = '0.5';
+      document.getElementById('step1-card').style.pointerEvents = 'none';
+      document.getElementById('step2-card').style.display = 'block';
+      document.getElementById('step2-card').style.opacity = '1';
+      document.getElementById('step2-card').style.pointerEvents = 'auto';
+      document.getElementById('step1-err').innerText = '';
+    } else {
+      document.getElementById('step1-err').innerText = json.message || '初始化失败';
+    }
+  }
+  
+  function backToStep1() {
+    document.getElementById('step2-card').style.opacity = '0.5';
+    document.getElementById('step2-card').style.pointerEvents = 'none';
+    document.getElementById('step1-card').style.opacity = '1';
+    document.getElementById('step1-card').style.pointerEvents = 'auto';
+  }
+  
+  async function submitStep2(e) {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    fd.append('csrf', CSRF_TOKEN);
+    const res = await fetch('/api/new/verify', { method: 'POST', body: fd });
+    const json = await res.json();
+    
+    const resultsDiv = document.getElementById('step2-results');
+    resultsDiv.style.display = 'flex';
+    resultsDiv.innerHTML = '';
+    
+    let allOk = true;
+    ['token', 'bot', 'probe'].forEach(k => {
+      if (json[k]) {
+        let ok = json[k].ok;
+        if (!ok) allOk = false;
+        let icon = ok ? '✅' : '❌';
+        let msgHtml = json[k].message ? json[k].message.replace(/\\n/g, '<br>') : '';
+        resultsDiv.innerHTML += `
+          <div class="ui-alert ${ok ? 'ok' : 'danger'}">
+            <span class="ico">${icon}</span>
+            <div>
+              <div class="title">${k} 检查</div>
+              <div class="desc wrap" style="white-space: pre-wrap;">${msgHtml}</div>
+            </div>
+          </div>
+        `;
+      }
+    });
+    
+    if (res.ok && allOk) {
+      document.getElementById('step2-card').style.opacity = '0.5';
+      document.getElementById('step2-card').style.pointerEvents = 'none';
+      document.getElementById('step3-card').style.display = 'block';
+      document.getElementById('step3-card').style.opacity = '1';
+      document.getElementById('step3-card').style.pointerEvents = 'auto';
+    } else if (json.message) {
+      showToast('失败', json.message, 'danger');
+    }
+  }
+  
+  async function enableInst() {
+    const fd = new FormData();
+    fd.append('inst', currentInst);
+    fd.append('csrf', CSRF_TOKEN);
+    const res = await fetch('/api/new/enable', { method: 'POST', body: fd });
+    const json = await res.json();
+    if (res.ok) {
+      showToast('成功', json.message || '启用成功', 'ok');
+      setTimeout(() => { window.location.href = '/i/' + currentInst; }, 1000);
+    } else {
+      showToast('失败', json.message || '启用失败', 'danger');
+    }
+  }
+</script>
+{% endblock %}

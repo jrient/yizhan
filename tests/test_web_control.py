@@ -198,3 +198,18 @@ def test_wizard_enable(cfg, sysctl):
     assert r['ok']
     assert ['systemctl', '--user', 'enable', '--now', 'yizhan-listener@demo'] in sysctl
     assert ['systemctl', '--user', 'enable', '--now', 'yizhan-dispatcher@demo.timer'] in sysctl
+
+
+def test_table_field_accepts_json_form(cfg):
+    """配置页把 table 渲染成 JSON,后端必须认;不认就会把 claude_env 清空,claude 立刻 403。"""
+    from gateway import config as configmod
+    r = control.config_write('demo', {'claude_env': '{"https_proxy": "http://127.0.0.1:7890"}'})
+    assert r['ok'], r['errors']
+    assert configmod.load('demo').claude_env == {'https_proxy': 'http://127.0.0.1:7890'}
+    r = control.config_write('demo', {'claude_env': '{坏的'})
+    assert not r['ok'] and 'JSON' in r['errors']['claude_env']
+    r = control.config_write('demo', {'claude_env': '["不是对象"]'})
+    assert not r['ok']
+    assert configmod.load('demo').claude_env == {'https_proxy': 'http://127.0.0.1:7890'}   # 没被改坏
+    r = control.config_write('demo', {'claude_env': '{}'})
+    assert r['ok'] and configmod.load('demo').claude_env == {}

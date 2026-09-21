@@ -7,6 +7,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import subprocess
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -78,11 +79,26 @@ def dispatcher_last(inst: str) -> dict:
 
 
 def timer_next(inst: str) -> str | None:
-    d = _show(f'yizhan-dispatcher@{inst}.timer', ['NextElapseUSecRealtime'])
+    """timer 下次什么时候触发。
+
+    OnUnitInactiveSec 这类相对定时器只填 NextElapseUSecMonotonic,实时字段是 0,
+    所以要用开机时刻把单调时间换算回墙上时间(2026-09-21 页面显示 null 才发现)。
+    """
+    d = _show(f'yizhan-dispatcher@{inst}.timer',
+              ['NextElapseUSecRealtime', 'NextElapseUSecMonotonic'])
     us = d.get('NextElapseUSecRealtime')
-    if not us or not us.isdigit() or us == '0':
-        return None
-    return datetime.fromtimestamp(int(us) / 1e6).strftime('%H:%M:%S')
+    if us and us.isdigit() and us != '0':
+        return datetime.fromtimestamp(int(us) / 1e6).strftime('%H:%M:%S')
+    mono = d.get('NextElapseUSecMonotonic')
+    if mono and mono.isdigit() and mono != '0':
+        try:
+            with open('/proc/uptime') as f:
+                up = float(f.read().split()[0])
+            boot = time.time() - up
+            return datetime.fromtimestamp(boot + int(mono) / 1e6).strftime('%H:%M:%S')
+        except (OSError, ValueError):
+            return None
+    return None
 
 
 # ---- 健康 ----
@@ -210,8 +226,11 @@ def overview(inst: str) -> dict:
     states = dict(conn.execute('SELECT state,COUNT(*) FROM issues GROUP BY state').fetchall())
     summary = instance_summary(inst)
     conn.close()
+    # dispatcher 正在跑时 timer 没有下次时间(OnUnitInactiveSec 要等它先停),不是故障
+    dispatcher_active = unit_state(f'yizhan-dispatcher@{inst}.service') in ('active', 'activating')
     return {'inst': inst, 'hourly': hourly, 'alerts': alerts, 'card_states': states,
             'summary': summary, 'timer_next': timer_next(inst),
+            'dispatcher_active': dispatcher_active,
             'quiet_seconds': cfg.quiet_seconds, 'skill': cfg.skill}
 
 

@@ -149,8 +149,22 @@ def main(argv=None) -> int:
         except Exception as e:
             log.exception('处理进群事件失败: %s', e)
 
+    def ignore(_data):
+        """订阅里带上但我们不处理的事件。
+
+        不注册的话 SDK 每收到一条就打两行 ERROR「processor not found」,
+        日志页翻不动(2026-09-21 截图时满屏都是表情事件)。
+        """
+        return None
+
     builder = (lark.EventDispatcherHandler.builder('', '')
                .register_p2_im_message_receive_v1(on_message))
+    for name in ('register_p2_im_message_reaction_created_v1',
+                 'register_p2_im_message_reaction_deleted_v1',
+                 'register_p2_im_message_recalled_v1'):
+        fn = getattr(builder, name, None)
+        if fn:
+            builder = fn(ignore)
     for name in ('register_p2_im_chat_member_bot_added_v1', 'register_p2_im_chat_member_bot_deleted_v1'):
         fn = getattr(builder, name, None)
         if fn and 'added' in name:
