@@ -1,0 +1,37 @@
+{
+  "_说明": "驿站是运维工具,操作对象是 systemd 服务、用户目录下的状态和本机接口,越出项目目录是常态。这里把这些常用命令预批,减少确认。不含任何删除或写系统目录的命令。",
+  "permissions": {
+    "allow": [
+      "Bash(systemctl --user status:*)",
+      "Bash(systemctl --user is-active:*)",
+      "Bash(systemctl --user is-enabled:*)",
+      "Bash(systemctl --user show:*)",
+      "Bash(systemctl --user list-units:*)",
+      "Bash(systemctl --user list-unit-files:*)",
+      "Bash(systemctl --user list-timers:*)",
+      "Bash(systemctl --user start:*)",
+      "Bash(systemctl --user stop:*)",
+      "Bash(systemctl --user restart:*)",
+      "Bash(systemctl --user daemon-reload)",
+      "Bash(journalctl --user:*)",
+      "Bash(loginctl show-user:*)",
+      "Bash(curl -s --noproxy '*' http://127.0.0.1:*)",
+      "Bash(curl -s --noproxy '*' http://127.0.0.1:*)",
+      "Bash(/data/projects/yizhan/.venv/bin/pytest:*)",
+      "Bash(.venv/bin/pytest:*)",
+      "Bash(.venv/bin/python:*)",
+      "Bash(.venv/bin/yizhan:*)",
+      "Bash(.venv/bin/fgctl:*)",
+      "Read(//home/hongshu/.local/state/yizhan/**)",
+      "Read(//home/hongshu/.config/systemd/user/**)",
+      "Read(//data/projects/drama-auto/**)",
+      "Write(//home/hongshu/.local/state/yizhan/**)",
+      "Edit(//home/hongshu/.local/state/yizhan/**)"
+    ],
+    "deny": [
+      "Read(//data/projects/yizhan/config/*.toml)",
+      "Bash(rm -rf:*)",
+      "Bash(sudo:*)"
+    ]
+  }
+}
