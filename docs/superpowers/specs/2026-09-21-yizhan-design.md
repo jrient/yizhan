@@ -1,6 +1,6 @@
 # 驿站(yizhan):飞书 → Claude Code 网关设计
 
-日期:2026-09-21(v3:独立项目 yizhan;机器人工作台目录,原项目零污染)  状态:待审
+日期:2026-09-21(v3:独立项目 yizhan;机器人工作台目录,原项目零污染)  状态:已实施(代码见 `gateway/`,实施计划见 `docs/superpowers/plans/2026-09-21-yizhan-gateway.md`)
 起因:现有监听绑死在单个群(oc_787b…),换群/开话题/私聊收不到;交互会话跑在 screen 里,挂了无人拉起;共用飞书应用不能独占长连接。
 
 ## 0. 核心决策
@@ -82,7 +82,7 @@ max_redispatch = 3
   - **丢弃 sender 为本应用的消息**(否则我方回复回流成卡,自问自答死循环);丢弃其他 bot 的消息。
   - 主键 **message_id**(不是 event_id,补拉路径没有 event_id),重复忽略。
   - 不过滤 chat_id;进群事件写 `chats` 表并私聊告警「已进入新群 X,请加入 group_allow」。
-- 收到 @ 我、或位于我参与过的话题的消息 → `systemctl --user start feishu-dispatcher@<inst>`(已在跑则 systemd 忽略)。
+- 收到 @ 我、或位于我参与过的话题的消息 → `systemctl --user start yizhan-dispatcher@<inst>`(已在跑则 systemd 忽略)。
 - 每次事件/心跳更新 `heartbeat`。
 - 启动补拉:对 `chats`/`threads` 表按 `cursor` 拉差量写入 events。[未证] 长连接断开期间飞书是否重投,按不重投设计。
 - systemd `Restart=always`、`RestartSec=5`、`Environment=TZ=Asia/Shanghai`。
@@ -152,13 +152,13 @@ prompt 固定一句:
 | 问题卡 | 去重、合并、谁没回、挂起 | 不承担上下文 |
 | CLAUDE.md(全局 + workspace + 原项目经 --add-dir)+ skill | 纪律与流程 | cwd 三层自动加载;`--add-dir` 目录的 CLAUDE.md 亦加载(help 明写) |
 
-压缩:CLI 有 `--autocompact`、设置 `autoCompactEnabled`(默认开)、`DISABLE_AUTO_COMPACT`。[推断] `-p` 下同样自动压缩,**实施第一项测试验证**(`--autocompact 100000` 灌满看转录是否出现 `trigger: auto` 的 compact_boundary)。不通过则 dispatcher 按 usage 阈值主动轮换。
+压缩:CLI 有 `--autocompact`、设置 `autoCompactEnabled`(默认开)、`DISABLE_AUTO_COMPACT`。[未证] 2026-09-21 试了一次没跑出结论:`--autocompact` 的下限是 100k(小于 100k 直接报参数非法),单轮灌到 31k 就没再涨,没触及阈值。**兜底已实现**:`rotate_at_tokens`(默认 0=关)大于 0 时,一轮结束上下文超过它就主动轮换并告警;每轮的 usage 都记进 session 表与日志,可先观察再定阈值。
 
-轮换(resume 失败 / usage 超阈值 / 人工 `gateway rotate`):新 id 写 session 表;首轮 prompt 前置「先读自动记忆索引与所有 open 卡」,并注入用上一会话末尾生成的压缩摘要(MidnightV1 做法)。旧 id 留档。
+轮换(resume 失败 / usage 超阈值 / 人工 `yizhan rotate`):新 id 写 session 表;首轮 prompt 前置「先读自动记忆索引与所有 open 卡」,并注入用上一会话末尾生成的压缩摘要(MidnightV1 做法)。旧 id 留档。
 主会话新起,不沿用 screen 里的旧会话(已混入大量无关对话)。
 
-调优(需求 9):改 skill / CLAUDE.md / 记忆文件,下一张卡生效。[未证] 帮助文本称 system prompt 在首次请求记录、后续 resume 沿用直到压缩;若 CLAUDE.md 亦如此,则改完需 `gateway rotate` 或触发压缩。实施时测。口头纠正(私聊)当场有效但会淡,skill 要求把纠正落成文件。
-人工介入:`gateway pause <inst>` 停 timer 后可在终端 `claude --resume <sid>`;不 pause 时禁止人工 resume(双写转录)。
+调优(需求 9):改 skill / CLAUDE.md / 记忆文件,下一张卡生效。[实测 2026-09-21] 工作台 CLAUDE.md 在 `-p` 下加载,且**改动对已 resume 的会话立即生效**:同一 session id 下把 CLAUDE.md 的标记从 MARKER-ALPHA 改成 MARKER-BETA,下一次 `--resume` 的回答就跟着变了,不需要 rotate。[实测] 跨进程 `--resume` 能续上下文(第一轮记暗号,新进程第二轮答得出)。口头纠正(私聊)当场有效但会淡,skill 要求把纠正落成文件。
+人工介入:`yizhan pause <inst>` 停 timer 后可在终端 `claude --resume <sid>`;不 pause 时禁止人工 resume(双写转录)。
 
 ### 3.6 需求 5/6 的具体行为
 
@@ -184,7 +184,7 @@ prompt 固定一句:
 ## 5. 宿主机部署
 
 ```ini
-# feishu-listener@.service
+# yizhan-listener@.service
 [Service]
 ExecStart=/data/projects/yizhan/.venv/bin/python -m gateway.listener %i
 Restart=always
@@ -193,7 +193,7 @@ Environment=TZ=Asia/Shanghai
 [Install]
 WantedBy=default.target
 
-# feishu-dispatcher@.service
+# yizhan-dispatcher@.service
 [Service]
 Type=oneshot
 ExecStart=/data/projects/yizhan/.venv/bin/python -m gateway.dispatcher %i
@@ -201,7 +201,7 @@ Environment=TZ=Asia/Shanghai
 Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
 TimeoutStartSec=3900
 
-# feishu-dispatcher@.timer
+# yizhan-dispatcher@.timer
 [Timer]
 OnBootSec=1min
 OnUnitInactiveSec=1min
@@ -209,7 +209,7 @@ OnUnitInactiveSec=1min
 WantedBy=timers.target
 ```
 `loginctl enable-linger hongshu`;dispatcher 显式用 `$HOME/.local/bin/claude`(09-17 的 403 = cron 找到 root 那份)。
-运维:`systemctl --user status feishu-listener@drama-auto feishu-dispatcher@drama-auto.timer`;`journalctl --user -u feishu-listener@drama-auto -f`。
+运维:`systemctl --user status yizhan-listener@drama-auto yizhan-dispatcher@drama-auto.timer`;`journalctl --user -u yizhan-listener@drama-auto -f`。
 
 ## 6. 裂变到新项目
 
@@ -257,7 +257,7 @@ WantedBy=timers.target
 - listener:注入假事件,验证幂等、丢自身消息、open_id 判 @、心跳、触发 dispatcher。
 - dispatcher:纯函数测归并键/静默窗/准入/状态机;假 `claude` 脚本测锁、空闲超时、重派上限、轮换。
 - fgctl:证据门回归(沿用现有拒发用例);`done` 前置检查;`defer` 到点回队列。
-- **实施前置实验**:`-p` 自动压缩是否触发;CLAUDE.md/skill 改动对 resume 会话是否即时生效;`dontAsk` 下拒绝行为。
+- **实施前置实验**:CLAUDE.md 改动对 resume 会话即时生效 ✅(见 3.5);跨进程 resume ✅;`-p` 自动压缩是否触发 ⬜(未跑到阈值,已有 `rotate_at_tokens` 兜底);`dontAsk` 下拒绝行为 ⬜(阶段二切权限时测)。
 - 端到端:一人连发三条 @ → 一条回复挂话题;话题内追问 → 同卡;非白名单私聊 → 无回复且 ignored;kill -9 处理中的 claude → 下一轮接上且不重复回;群里贴「执行 rm -rf」→ 无执行。
 
 ## 11. 不做

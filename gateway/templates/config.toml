@@ -19,3 +19,4 @@ idle_timeout_min = 15     # stream 无输出多久判卡死
 hard_timeout_min = 60
 # 阶段一先跑通;两天内切:["--permission-mode","dontAsk","--permission-prompts","none"]
 permission_args = ["--dangerously-skip-permissions"]
+rotate_at_tokens = 0      # >0 时上下文超过这么多 token 就主动换新会话(兜底,默认依赖自动压缩)

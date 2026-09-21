@@ -42,6 +42,14 @@ def ensure_session(conn, reason='init') -> tuple[str, bool]:
     return s['session_id'], bool(s['fresh'])
 
 
+def context_tokens(usage: dict | None) -> int:
+    """一轮结束时主会话占了多少上下文:新增输入 + 命中缓存的部分。"""
+    if not usage:
+        return 0
+    return sum(int(usage.get(k) or 0) for k in
+               ('input_tokens', 'cache_read_input_tokens', 'cache_creation_input_tokens'))
+
+
 def restart_listener(inst: str):
     import subprocess
     try:
@@ -78,6 +86,13 @@ def process_card(conn, cfg, client, it) -> str:
         cards.finish_card(conn, cfg, iid)
         return 'rotated'
     dbm.session_mark_used(conn, res.usage)
+    ctx_tokens = context_tokens(res.usage)
+    if ctx_tokens:
+        log.info('本轮上下文 %d tokens', ctx_tokens)
+    if cfg.rotate_at_tokens and ctx_tokens >= cfg.rotate_at_tokens:
+        new_sid = dbm.session_rotate(conn, f'usage {ctx_tokens} >= {cfg.rotate_at_tokens}')
+        alert(conn, client, cfg, 'session_rotate',
+              f'主会话上下文到 {ctx_tokens} tokens,已轮换到 {new_sid}')
     if res.idle_killed or res.hard_killed:
         log.warning('卡 #%s 超时被杀 idle=%s hard=%s', iid, res.idle_killed, res.hard_killed)
     state = cards.finish_card(conn, cfg, iid)

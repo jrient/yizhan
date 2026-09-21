@@ -31,6 +31,9 @@ class Config:
     idle_timeout_min: int = 15
     hard_timeout_min: int = 60
     probe_timeout_sec: int = 30
+    # 兜底:主会话上下文超过这么多 token 就主动轮换。0 = 关(依赖 CLI 自带的自动压缩)。
+    # 09-21 的自动压缩实验没跑到 100k 阈值,结论未定,所以留这个开关。
+    rotate_at_tokens: int = 0
     paths: Paths = field(default=None, repr=False)  # type: ignore[assignment]
 
     REQUIRED = ('app_id', 'app_secret', 'project_dir')
