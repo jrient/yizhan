@@ -8,7 +8,7 @@
 
 | 决策 | 结论 | 依据 |
 |---|---|---|
-| 与现有服务的关系 | 独立的第三个 systemd 单元 `yizhan-web.service`,读同一份 `state.db`、调 `systemctl --user`、写 `config/*.toml`;listener / dispatcher 一行不改 | 用户选 A:改动最小,不推翻已跑稳的东西 |
+| 与现有服务的关系 | 独立的第三个 systemd 单元 `yizhan-web.service`,读同一份 `state.db`、调 `systemctl --user`、写 `config/*.toml`;listener 不改,dispatcher 只在收尾处多落两行库(见 2.1) | 用户选 A:改动最小,不推翻已跑稳的东西 |
 | 技术栈 | FastAPI + Jinja 模板 + htmx 局部刷新 + SSE;前端零构建,全 Python,装现有 `.venv` | 用户选 A:与现有结构一致,不引入 node;API 层留着,以后要换前端不用重写后端 |
 | 布局 | 首页卡片墙(每实例一张卡),点进详情页(五个页签) | 用户在线框图里选 B |
 | 配置编辑 | 表单,字段旁带说明,密钥打码 | 用户选 A:字段固定十来个,说明文字对分享给同事最有用 |
@@ -62,7 +62,18 @@ password = "填这里"
 session_hours = 72
 ```
 
-活跃度、token 统计从 `events / issues / replies / session` 表现场聚合,不建统计表(每天几十条的量级)。
+活跃度从 `events / issues / replies` 表现场聚合,不建统计表(每天几十条的量级)。
+
+### 2.1 为页面补的两张表(`db.py`,dispatcher 收尾各插一行)
+
+审稿时发现两个数据没处可读:轮换历史只有当前与上一个 id;每轮 usage 在 `claude-stream.jsonl` 里有 token、耗时、`total_cost_usd`,但没有卡号,对不上卡。所以:
+
+| 表 | 列 | 谁写 |
+|---|---|---|
+| `rounds` | round_id、issue_id、session_id、started_at、ended_at、rc、context_tokens、output_tokens、cost_usd、outcome(answered/waiting/open/stuck/rotated) | `dispatcher.process_card` 收尾 |
+| `session_history` | session_id、created_at、reason、prev_id、ended_at | `db.session_rotate`(已有函数,顺手插) |
+
+`total_cost_usd` 让「成本」从 token 数变成真实美元(实测一轮约 0.6 美元)。
 
 ## 3. 页面
 
@@ -71,7 +82,7 @@ session_hours = 72
 每实例一张卡:健康点、心跳距今、今日消息数 / 卡数、待处理卡数、上下文 token、最近一条告警、是否暂停。按钮:暂停/恢复、详情。右上「新建实例」。30 秒自动刷新(htmx 轮询 `/api/instances`)。
 
 健康点判定:
-- **红**:listener 单元不是 active;或心跳 > 10 分钟;或有 stuck 卡;或最近一次探活失败(读 `alerts` 表 `probe_failed` 1 小时内)
+- **红**:listener 单元不是 active;或心跳 > 10 分钟;或有 stuck 卡;或 dispatcher 上次运行退出码非 0(`systemctl --user show yizhan-dispatcher@<inst> -p Result,ExecMainStatus,ExecMainExitTimestampMonotonic`;退出码 1 = 探活失败,不读告警表,因为告警 1 小时去重且恢复后不会清)
 - **黄**:有卡 open > 30 分钟;或已暂停(`paused` 文件存在)
 - **绿**:其余
 - **灰**:`state.db` 不存在(已 init 未启用)或损坏
@@ -82,7 +93,7 @@ session_hours = 72
 |---|---|---|
 | 概览 | 四个数字块(心跳、今日消息/卡、待处理、上下文);今日按小时的消息数与卡数折线;最近 10 条告警;服务状态(listener 在否、timer 下次触发、暂停否) | 暂停 · 恢复 · 重启监听 · 轮换会话 · 立即派一轮 |
 | 卡 | 表:编号、状态、发起人(名字或 open_id)、消息数、建于、首次回复耗时、重派次数;按状态筛选、分页 20。点行展开:消息原文(附件缩略)、我方每条回复的正文 + type + evidence + 时间 | stuck 卡「重开」(→ open,redispatch 清零) |
-| 会话 | 当前 session id、建于、fresh、上下文 token;每轮 usage 柱状图(来自 `claude-stream.jsonl` 的 result 行);轮换历史带原因(解析 `dispatcher.log` 的「轮换」行) | 轮换 |
+| 会话 | 当前 session id、建于、fresh、上下文 token;每轮柱状图(`rounds` 表:上下文 token、输出 token、美元成本,点柱子跳到那张卡);累计成本;轮换历史(`session_history` 表) | 轮换 |
 | 日志 | 三个流可切:listener / dispatcher / claude-stream;SSE 实时滚动 | 暂停滚动 · 关键字过滤 |
 | 配置 | 表单:app_id、app_secret(打码,点「显示」)、project_dir、skill、alert_open_id、p2p_allow(可增删列表)、group_allow(同)、quiet_seconds、lock_minutes、max_redispatch、merge_gap_minutes、idle/hard timeout、permission_args(单选:skip / dontAsk)、rotate_at_tokens、reply_in_thread、claude_env(键值对)。每个字段旁一句说明,白名单字段附「怎么拿 open_id / chat_id」 | 保存 → 校验 → 写文件 → toast「listener 需重启才生效」+ 重启按钮 |
 
@@ -104,11 +115,11 @@ session_hours = 72
 |---|---|
 | `GET /` `GET /i/{inst}` `GET /new` `GET /login` | 页面 |
 | `POST /login` `POST /logout` | 口令 → cookie |
-| `GET /api/instances` | `[{inst, health, health_reason, heartbeat_ago_s, today_msgs, today_cards, today_replies, pending, context_tokens, last_alert:{kind,at,text}, paused, units:{listener, timer}}]` |
+| `GET /api/instances` | `[{inst, health, health_reason, heartbeat_ago_s, today_msgs, today_cards, today_replies, today_cost_usd, pending, context_tokens, last_alert:{kind,at,text}, paused, units:{listener, timer, dispatcher_last:{rc, at}}}]` |
 | `GET /api/i/{inst}/overview` | 数字块 + `hourly:[{hour, msgs, cards}]` + `alerts[]` + `units` + `timer_next` |
 | `GET /api/i/{inst}/cards?state=&page=` | `{total, items:[{id, state, sender, sender_name, n_msgs, created_at, first_reply_s, redispatch, note}]}` |
 | `GET /api/i/{inst}/cards/{id}` | `{card, messages:[{mid, at, sender_name, text, images[]}], replies:[{at, via, type, evidence, summary}]}` |
-| `GET /api/i/{inst}/session` | `{session_id, created_at, fresh, context_tokens, rounds:[{at, context_tokens, output_tokens, card_id}], rotations:[{at, reason, prev}]}` |
+| `GET /api/i/{inst}/session` | `{session_id, created_at, fresh, context_tokens, total_cost_usd, rounds:[{at, issue_id, context_tokens, output_tokens, cost_usd, outcome, duration_s}], rotations:[{session_id, created_at, ended_at, reason, prev_id}]}` |
 | `GET /api/i/{inst}/logs/{stream}?q=&since=` (SSE) | stream ∈ listener / dispatcher / claude;每行一个 `data:` 事件 `{at, level, text}`;`since` 为断线续传的时间戳 |
 | `GET /api/i/{inst}/config` | 字段值,`app_secret` 返回 `"••••" + 末 4 位` |
 | `POST /api/i/{inst}/config` | 字段级校验 → 合成 toml → `config.load` 再校验 → 写 `.tmp` 后 rename。密钥字段若提交的是打码值则保留原值。返回 `{ok, errors:{field:msg}, needs_restart:["listener"]}` |
@@ -131,7 +142,8 @@ session_hours = 72
 ## 6. 测试
 
 - **后端 pytest**(复用现有 `conftest`):
-  - `data.py`:假库灌事件/卡/回复,断言健康判定四色、今日统计、按小时序列、首回耗时
+  - `data.py`:假库灌事件/卡/回复/rounds,断言健康判定四色、今日统计、按小时序列、首回耗时、成本累计
+  - `db.py` / `dispatcher.py`:一轮结束后 `rounds` 有一行且字段正确;`session_rotate` 写 `session_history`;假 claude 的 result 带 `total_cost_usd`
   - `control.py`:`subprocess.run` 打桩,断言每个 action 的 systemctl 参数;配置写入的校验、打码保留、原子 rename;`reopen-card` 状态变化
   - `auth.py`:口令对错、cookie 签发与过期、5 次锁定
   - `logs.py`:journalctl JSON 行 → 事件格式;关键字过滤;`since` 续传
