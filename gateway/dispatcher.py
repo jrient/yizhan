@@ -127,10 +127,29 @@ def process_card(conn, cfg, client, it) -> str:
     return state
 
 
+class ProbeFailed(Exception):
+    """claude 连不上。不动任何卡,下一轮再试。"""
+
+
 def run_once(cfg, *, client=None, max_cards: int = 20, max_wait_sec: float = 90) -> int:
     conn = dbm.connect(cfg.paths.db_file)
     client = client if client is not None else FeishuClient(cfg.app_id, cfg.app_secret)
     handled = 0
+    probed: bool | None = None
+
+    def ensure_probe() -> bool:
+        """真有卡要处理时才探活。
+
+        原来每轮无条件先探一次:一天 599 轮里大多数是空转,白起 599 个 claude 进程,
+        还会在没活干的时候因为探活超时刷告警(2026-09-22 日志里 80 次)。
+        """
+        nonlocal probed
+        if probed is None:
+            ok, msg = claude_runner.probe(cfg)
+            probed = ok
+            if not ok:
+                alert(conn, client, cfg, 'probe_failed', f'claude 探活失败,不动任何卡: {msg}')
+        return probed
     for iid, st in cards.recover_stale(conn, cfg):
         log.warning('上一轮遗留的 answering 卡 #%s → %s', iid, st)
     for _ in range(max_cards):
@@ -141,6 +160,8 @@ def run_once(cfg, *, client=None, max_cards: int = 20, max_wait_sec: float = 90)
                   f'卡 #{iid} 已经挂起 {cards.MAX_DEFER} 次还没结,标 stuck 不再自动唤醒。'
                   f'人工看一眼:fgctl card {iid}')
         it = cards.pick_card(conn, cfg, dbm.now_ms())
+        if it is not None and not ensure_probe():
+            raise ProbeFailed
         if it is None:
             # 只差静默窗就等它到点,别空转退出让 timer 再等一分钟
             ready = cards.next_ready_at(conn, cfg, dbm.now_ms())
@@ -174,15 +195,12 @@ def main(argv=None) -> int:
         log.info('上一轮仍在运行,跳过')
         return 0
     try:
-        conn = dbm.connect(cfg.paths.db_file)
         client = FeishuClient(cfg.app_id, cfg.app_secret)
-        ok, msg = claude_runner.probe(cfg)
-        if not ok:
-            alert(conn, client, cfg, 'probe_failed', f'claude 探活失败,不动任何卡: {msg}')
-            conn.close()
+        try:
+            n = run_once(cfg, client=client)
+        except ProbeFailed:
+            log.warning('探活失败,本轮不动任何卡')
             return 1
-        conn.close()
-        n = run_once(cfg, client=client)
         log.info('本轮处理 %d 张卡', n)
         return 0
     finally:

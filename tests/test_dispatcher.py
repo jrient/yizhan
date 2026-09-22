@@ -47,8 +47,7 @@ def test_full_round_marks_answered_when_hook_answers(dcfg, tmp_path):
     conn = dbm.connect(dcfg.paths.db_file)
     it = dbm.get_issue(conn, 1)
     assert it['state'] == 'answered' and it['lock_owner'] is None
-    rec = json.loads((tmp_path / 'rec.jsonl').read_text().splitlines()[0])
-    assert '处理问题卡 #1' in ' '.join(rec['argv'])
+    assert '处理问题卡 #1' in _spawned_prompt(tmp_path / 'rec.jsonl')
     assert dbm.session_get(conn)['fresh'] == 0
 
 
@@ -139,8 +138,13 @@ def test_does_not_wait_for_far_future_card(dcfg):
 
 
 def _spawned_prompt(rec_file):
+    """取派卡那次的命令行。探活也会被假 claude 记一行,要跳过。"""
     import json as _j
-    return ' '.join(_j.loads(rec_file.read_text().splitlines()[0])['argv'])
+    for line in rec_file.read_text().splitlines():
+        argv = ' '.join(_j.loads(line)['argv'])
+        if '问题卡' in argv:
+            return argv
+    raise AssertionError('没有派卡的记录,只有: ' + rec_file.read_text()[:300])
 
 
 def test_followup_card_gets_different_prompt(dcfg, tmp_path):
@@ -179,3 +183,39 @@ def test_defer_exhausted_alerts(dcfg):
     assert any('挂起' in t and 'stuck' in t for t in c.texts)
     conn = dbm.connect(dcfg.paths.db_file)
     assert dbm.get_issue(conn, 1)['state'] == 'stuck'
+
+
+def test_no_probe_when_nothing_to_do(dcfg, monkeypatch):
+    """没卡可处理就别探活。一天几百轮空转,每轮起一个 claude 纯属浪费。"""
+    calls = []
+    monkeypatch.setattr(dispatcher.claude_runner, 'probe',
+                        lambda cfg: (calls.append(1), (True, 'ok'))[1])
+    assert dispatcher.run_once(dcfg, client=FakeClient(), max_wait_sec=0) == 0
+    assert calls == []
+
+
+def test_probes_once_when_there_is_work(dcfg, monkeypatch):
+    calls = []
+    monkeypatch.setattr(dispatcher.claude_runner, 'probe',
+                        lambda cfg: (calls.append(1), (True, 'ok'))[1])
+    conn = dbm.connect(dcfg.paths.db_file)
+    for i in range(2):
+        dbm.insert_event(conn, EventRow(message_id=f'om_{i}', chat_id='oc_group1', chat_type='group',
+                                        create_time=dbm.now_ms() - 120_000 - i * 700_000,
+                                        sender_id=f'ou_{i}', sender_type='user', msg_type='text',
+                                        text='q', mentions=ME, mentions_me=True))
+    conn.close()
+    dispatcher.run_once(dcfg, client=FakeClient(), max_cards=4)
+    assert len(calls) == 1          # 两张卡也只探一次
+
+
+def test_probe_failure_touches_no_card(dcfg, monkeypatch):
+    monkeypatch.setattr(dispatcher.claude_runner, 'probe', lambda cfg: (False, '探活超时 30s'))
+    conn = dbm.connect(dcfg.paths.db_file); seed(conn, dcfg); conn.close()
+    c = FakeClient()
+    with pytest.raises(dispatcher.ProbeFailed):
+        dispatcher.run_once(dcfg, client=c, max_cards=1)
+    conn = dbm.connect(dcfg.paths.db_file)
+    it = dbm.get_issue(conn, 1)
+    assert it['state'] == 'open' and it['redispatch'] == 0      # 卡原封不动
+    assert any('探活失败' in t for t in c.texts)
