@@ -160,7 +160,7 @@ def test_wizard_init_validation(auth_client, tmp_path):
 # ---- SSE ----
 def test_logs_stream(auth_client, cfg, monkeypatch):
     """真实的日志流是无限的,这里换成会结束的假流,只验路由把事件包成 SSE。"""
-    def finite(inst, stream, since=0, q=None):
+    def finite(inst, stream, since=0, q=None, stop=None):
         assert (inst, stream) == ('demo', 'claude')
         yield {'at': 1, 'level': 'info', 'text': '嗨'}
     from gateway.web import app as appmod
@@ -169,6 +169,25 @@ def test_logs_stream(auth_client, cfg, monkeypatch):
         assert r.status_code == 200
         payloads = [json.loads(l[5:].strip()) for l in r.iter_lines() if l.startswith('data:')]
     assert payloads == [{'at': 1, 'level': 'info', 'text': '嗨'}]
+
+
+def test_logs_stream_signals_stop_not_close(auth_client, cfg, monkeypatch):
+    """断线时不能对着可能正在线程里跑的生成器 close() —— 会 ValueError: generator
+    already executing(2026-09-21 实测 500)。改成置 stop,让生成器自己收尾。"""
+    seen = {}
+    def finite(inst, stream, since=0, q=None, stop=None):
+        seen['stop'] = stop
+        seen['closed'] = False
+        try:
+            yield {'at': 1, 'level': 'info', 'text': '嗨'}
+        except GeneratorExit:
+            seen['closed'] = True
+            raise
+    from gateway.web import app as appmod
+    monkeypatch.setattr(appmod.logs, 'stream_events', finite)
+    with auth_client.stream('GET', '/api/i/demo/logs/claude') as r:
+        list(r.iter_lines())
+    assert seen['stop'] is not None and seen['stop'].is_set()
 
 
 def test_logs_unknown_stream_400(auth_client):

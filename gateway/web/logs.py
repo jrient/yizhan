@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import threading
 import time
 from pathlib import Path
 from typing import Iterator
@@ -75,11 +76,18 @@ def _keep(ev: dict | None, since_ms: int, q: str | None) -> bool:
 
 
 def tail_journal(unit: str, since_ms: int = 0, q: str | None = None,
-                 lines: int = 200) -> Iterator[dict]:
+                 lines: int = 200, stop: threading.Event | None = None) -> Iterator[dict]:
     argv = ['journalctl', '--user', '-u', unit, '-o', 'json', '-n', str(lines), '-f', '--no-pager']
     p = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, bufsize=1)
+    if stop is not None:
+        # 读 stdout 会一直阻塞到下一条日志,生成器自己醒不过来。
+        # 让一个看门线程在 stop 置位时 terminate,读就断了,循环才收得掉。
+        threading.Thread(target=_terminate_on_stop, args=(p, stop),
+                         name='journal-stop', daemon=True).start()
     try:
         for line in p.stdout:
+            if stop is not None and stop.is_set():
+                break
             ev = parse_journal_line(line)
             if _keep(ev, since_ms, q):
                 yield ev
@@ -87,8 +95,17 @@ def tail_journal(unit: str, since_ms: int = 0, q: str | None = None,
         p.terminate()
 
 
+def _terminate_on_stop(p, stop: threading.Event):
+    stop.wait()
+    try:
+        p.terminate()
+    except Exception:
+        pass
+
+
 def tail_file(path: Path, since_ms: int = 0, q: str | None = None, parse=parse_stream_line,
-              lines: int = 200, poll: float = 0.5, _once: bool = False) -> Iterator[dict]:
+              lines: int = 200, poll: float = 0.5, _once: bool = False,
+              stop: threading.Event | None = None) -> Iterator[dict]:
     """先补最后 N 行,再跟着文件追加往下读。文件不存在就等它出现。"""
     path = Path(path)
     if path.exists():
@@ -101,7 +118,11 @@ def tail_file(path: Path, since_ms: int = 0, q: str | None = None, parse=parse_s
     else:
         pos = 0
     while not _once:
-        time.sleep(poll)
+        if stop is not None:
+            if stop.wait(poll):             # 置位就收尾,不用外面 close()
+                return
+        else:
+            time.sleep(poll)
         if not path.exists():
             continue
         size = path.stat().st_size
@@ -128,21 +149,23 @@ def journal_available() -> bool:
         return False
 
 
-def stream_events(inst: str, stream: str, since_ms: int = 0, q: str | None = None) -> Iterator[dict]:
+def stream_events(inst: str, stream: str, since_ms: int = 0, q: str | None = None,
+                  stop: threading.Event | None = None) -> Iterator[dict]:
     if stream not in STREAMS:
         raise ValueError(f'不认识的日志流: {stream}')
     cfg = configmod.load(inst)
     if stream == 'claude':
-        yield from tail_file(cfg.paths.logs / 'claude-stream.jsonl', since_ms, q)
+        yield from tail_file(cfg.paths.logs / 'claude-stream.jsonl', since_ms, q, stop=stop)
         return
     if journal_available():
-        yield from tail_journal(unit_for(inst, stream), since_ms, q)
+        yield from tail_journal(unit_for(inst, stream), since_ms, q, stop=stop)
         return
     # journald 读不到时的退路:dispatcher 自己也往文件写了一份
     if stream == 'dispatcher':
         yield {'at': int(time.time() * 1000), 'level': 'warn',
                'text': '[读不到 journal,退回读 logs/dispatcher.log]'}
-        yield from tail_file(cfg.paths.logs / 'dispatcher.log', since_ms, q, parse=_parse_plain)
+        yield from tail_file(cfg.paths.logs / 'dispatcher.log', since_ms, q, parse=_parse_plain,
+                             stop=stop)
     else:
         yield {'at': int(time.time() * 1000), 'level': 'error',
                'text': '[读不到 journal,listener 没有文件日志。用 journalctl --user -u '

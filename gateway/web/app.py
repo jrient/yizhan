@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import threading
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, Form, HTTPException, Query, Request
@@ -184,7 +185,11 @@ def create_app(settings: WebSettings | None = None) -> FastAPI:
             raise HTTPException(400, f'不认识的日志流: {stream}')
 
         async def gen():
-            it = logs.stream_events(inst, stream, since, q)
+            # next() 在线程池里跑,断线时这边可能正被取消,而线程还堵在里面。
+            # 这种时候 it.close() 会撞上「generator already executing」(2026-09-21 实测
+            # 500),所以只置 stop,让生成器自己从循环里退出来收尾。
+            stop = threading.Event()
+            it = logs.stream_events(inst, stream, since, q, stop=stop)
             loop = asyncio.get_running_loop()
             try:
                 while True:
@@ -195,7 +200,7 @@ def create_app(settings: WebSettings | None = None) -> FastAPI:
                         break
                     yield {'event': 'log', 'data': json.dumps(ev, ensure_ascii=False)}
             finally:
-                it.close()
+                stop.set()
 
         return EventSourceResponse(gen())
 

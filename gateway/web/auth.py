@@ -37,7 +37,9 @@ class Auth:
         left = self.locked_for(ip)
         if left > 0:
             return False, f'错太多次了,{int(left / 60) + 1} 分钟后再试'
-        if hmac.compare_digest(pw or '', self.s.password):
+        # compare_digest 传 str 只接受 ASCII,口令里有中文就 TypeError → 500,
+        # 连失败都不记。统一按 utf-8 字节比(2026-09-22)。
+        if hmac.compare_digest((pw or '').encode('utf-8'), self.s.password.encode('utf-8')):
             self._fails.pop(ip, None)
             return True, ''
         self._fails[ip].append(self.clock())

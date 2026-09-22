@@ -69,3 +69,17 @@ def test_csrf():
     assert not a.verify_csrf(v, 'x' * 32)
     assert not a.verify_csrf(v, None)
     assert not a.verify_csrf(a.issue_cookie(), t)        # 换了会话旧 token 失效
+
+
+def test_non_ascii_password_does_not_blow_up():
+    """compare_digest 传 str 只吃 ASCII:用户敲中文口令会 TypeError → 500(2026-09-21 实测)。"""
+    a, _ = mk()
+    ok, msg = a.check_password('5.5.5.5', '中文口令')
+    assert not ok and '不对' in msg
+    assert len(a._fails['5.5.5.5']) == 1                 # 也得记一次失败,别绕过锁定
+
+
+def test_non_ascii_password_in_config_works():
+    a = Auth(WebSettings(password='中文口令', secret_key='b' * 64, session_hours=1))
+    assert a.check_password('6.6.6.6', '中文口令') == (True, '')
+    assert not a.check_password('6.6.6.6', '别的口令')[0]
