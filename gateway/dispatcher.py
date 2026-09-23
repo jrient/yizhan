@@ -113,19 +113,21 @@ def process_card(conn, cfg, client, it) -> str:
         dbm.record_error(conn, 'rc_nonzero', f'rc={res.rc} {res.stderr[-200:]}', iid)
     if res.resume_failed:
         dbm.record_error(conn, 'resume_failed', res.stderr[-200:], iid)
-        new_sid = dbm.session_rotate(conn, 'resume_failed')
-        alert(conn, client, cfg, 'session_rotate', f'--resume {sid} 失败,已轮换到 {new_sid}')
+        new_sid = dbm.session_rotate_if(conn, sid, 'resume_failed')
+        if new_sid:
+            alert(conn, client, cfg, 'session_rotate', f'--resume {sid} 失败,已轮换到 {new_sid}')
         cards.finish_card(conn, cfg, iid)
         _round('rotated')
         return 'rotated'
-    dbm.session_mark_used(conn, res.usage)
+    dbm.session_mark_used(conn, res.usage, sid=sid)
     ctx_tokens = res.context_tokens
     if ctx_tokens:
         log.info('主会话上下文 %d tokens', ctx_tokens)
     if cfg.rotate_at_tokens and ctx_tokens >= cfg.rotate_at_tokens:
-        new_sid = dbm.session_rotate(conn, f'usage {ctx_tokens} >= {cfg.rotate_at_tokens}')
-        alert(conn, client, cfg, 'session_rotate',
-              f'主会话上下文到 {ctx_tokens} tokens,已轮换到 {new_sid}')
+        new_sid = dbm.session_rotate_if(conn, sid, f'usage {ctx_tokens} >= {cfg.rotate_at_tokens}')
+        if new_sid:
+            alert(conn, client, cfg, 'session_rotate',
+                  f'主会话上下文到 {ctx_tokens} tokens,已轮换到 {new_sid}')
     if res.idle_killed or res.hard_killed:
         log.warning('卡 #%s 超时被杀 idle=%s hard=%s', iid, res.idle_killed, res.hard_killed)
     state = cards.finish_card(conn, cfg, iid)
@@ -139,11 +141,19 @@ def process_card(conn, cfg, client, it) -> str:
     return state
 
 
+# 必须和 systemd/yizhan-dispatcher@.service 里的 TimeoutStartSec 一致(有测试锁住)。
+# systemd 管的是整次 oneshot 运行,超时会把整个 cgroup 连同正在跑的 claude 一起杀掉;
+# 原来是 3900 秒,而一轮最多 20 张卡、每张最长 60 分钟,连着两张慢卡第二张就会在回复发到一半时被杀。
+UNIT_TIMEOUT_S = 14400
+RUN_MARGIN_S = 300
+
+
 class ProbeFailed(Exception):
     """claude 连不上。不动任何卡,下一轮再试。"""
 
 
-def run_once(cfg, *, client=None, max_cards: int = 20, max_wait_sec: float = 90) -> int:
+def run_once(cfg, *, client=None, max_cards: int = 20, max_wait_sec: float = 90,
+             unit_timeout_s: float = UNIT_TIMEOUT_S) -> int:
     conn = dbm.connect(cfg.paths.db_file)
     client = client if client is not None else FeishuClient(cfg.app_id, cfg.app_secret)
     handled = 0
@@ -165,7 +175,13 @@ def run_once(cfg, *, client=None, max_cards: int = 20, max_wait_sec: float = 90)
         return probed
     for iid, st in cards.recover_stale(conn, cfg):
         log.warning('上一轮遗留的 answering 卡 #%s → %s', iid, st)
+    t_start = time.time()
+    # 开始处理的卡必须来得及跑完:剩余时间不够一张卡的最长时限,就把剩下的交给下一轮
+    deadline = t_start + unit_timeout_s - cfg.hard_timeout_min * 60 - RUN_MARGIN_S
     for _ in range(max_cards):
+        if handled and time.time() > deadline:
+            log.info('本轮已用 %.0f 秒,剩余时间不够再跑一张卡,留给下一轮', time.time() - t_start)
+            break
         cards.assign_cards(conn, cfg, dbm.now_ms())
         _woke, exhausted = cards.wake_deferred(conn, dbm.now_ms())
         for iid in exhausted:

@@ -275,9 +275,25 @@ def session_rotate(conn, reason: str) -> str:
     return sid
 
 
-def session_mark_used(conn, usage: dict | None = None):
-    conn.execute('UPDATE session SET fresh=0, usage=COALESCE(?,usage) WHERE id=1',
-                 (json.dumps(usage, ensure_ascii=False) if usage else None,))
+def session_mark_used(conn, usage: dict | None = None, sid: str | None = None) -> bool:
+    """把会话记为已用。给了 sid 就只在当前会话仍是它时才改。
+
+    dispatcher 用会话 A 处理卡期间,有人在网页上轮换成 B(fresh=1)。收尾时不带条件地改,
+    会把从没创建过的 B 标成已用,下一张卡 --resume B 必然失败(2026-09-23 审查发现)。
+    """
+    q = 'UPDATE session SET fresh=0, usage=COALESCE(?,usage) WHERE id=1'
+    args: list = [json.dumps(usage, ensure_ascii=False) if usage else None]
+    if sid is not None:
+        q += ' AND session_id=?'; args.append(sid)
+    return conn.execute(q, args).rowcount > 0
+
+
+def session_rotate_if(conn, expected_sid: str, reason: str) -> str | None:
+    """只有当前会话还是 expected_sid 时才轮换;已经被别人换过就什么都不做,返回 None。"""
+    cur = session_get(conn)
+    if cur is None or cur['session_id'] != expected_sid:
+        return None
+    return session_rotate(conn, reason)
 
 
 def session_cost_cum(conn, session_id: str) -> float | None:

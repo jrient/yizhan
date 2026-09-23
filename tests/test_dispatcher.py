@@ -238,3 +238,56 @@ def test_stuck_recorded_as_error(dcfg):
     dispatcher.run_once(dcfg, client=FakeClient())
     conn = dbm.connect(dcfg.paths.db_file)
     assert conn.execute("SELECT COUNT(*) FROM errors WHERE kind='stuck'").fetchone()[0] == 1
+
+
+def test_unit_timeout_matches_systemd_file():
+    """两边改了一边忘了另一边,就会回到「第二张慢卡在回复发到一半时被杀」。"""
+    from pathlib import Path
+    unit = (Path(__file__).parent.parent / 'systemd' / 'yizhan-dispatcher@.service').read_text()
+    import re
+    assert int(re.search(r'^TimeoutStartSec=(\d+)', unit, re.M).group(1)) == dispatcher.UNIT_TIMEOUT_S
+
+
+def test_stops_taking_cards_when_time_budget_runs_out(dcfg, monkeypatch):
+    """剩余时间不够跑完一张卡时不再取新卡,交给下一轮。"""
+    conn = dbm.connect(dcfg.paths.db_file)
+    for i in range(3):
+        dbm.insert_event(conn, EventRow(message_id=f'om_{i}', chat_id='oc_group1', chat_type='group',
+                                        create_time=dbm.now_ms() - 120_000 - i * 700_000,
+                                        sender_id=f'ou_{i}', sender_type='user', msg_type='text',
+                                        text='q', mentions=ME, mentions_me=True))
+    conn.close()
+    dcfg.hard_timeout_min = 60
+    # 单元时限只比「一张卡 + 余量」多一点点:第一张一定跑,之后就该停
+    n = dispatcher.run_once(dcfg, client=FakeClient(), max_cards=10,
+                            unit_timeout_s=60 * 60 + dispatcher.RUN_MARGIN_S + 0.001)
+    assert n == 1
+
+
+def test_manual_rotation_during_round_is_respected(dcfg, tmp_path):
+    """处理卡期间有人手动轮换:收尾时不能把新会话标成已用,也不能再轮换一次。"""
+    import os
+    conn = dbm.connect(dcfg.paths.db_file)
+    seed(conn, dcfg)
+    a = dbm.session_rotate(conn, 'init'); dbm.session_mark_used(conn, sid=a)
+    conn.close()
+    hook = tmp_path / 'rotate.py'
+    hook.write_text("import sqlite3,uuid\n"
+                    f"c=sqlite3.connect({str(dcfg.paths.db_file)!r})\n"
+                    "c.execute(\"UPDATE session SET session_id=?, fresh=1 WHERE id=1\", (str(uuid.uuid4()),))\n"
+                    "c.execute(\"UPDATE issues SET state='answered' WHERE state='answering'\"); c.commit()\n")
+    os.environ['FAKE_HOOK'] = str(hook)
+    try:
+        dispatcher.run_once(dcfg, client=FakeClient(), max_cards=1)
+    finally:
+        os.environ.pop('FAKE_HOOK')
+    conn = dbm.connect(dcfg.paths.db_file)
+    s = dbm.session_get(conn)
+    assert s['session_id'] != a and s['fresh'] == 1           # 新会话保持「未开始」
+
+
+def test_session_rotate_if(db):
+    a = dbm.session_rotate(db, 'init')
+    assert dbm.session_rotate_if(db, 'someone-else', 'x') is None
+    b = dbm.session_rotate_if(db, a, 'x')
+    assert b and dbm.session_get(db)['session_id'] == b

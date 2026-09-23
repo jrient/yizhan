@@ -7,4 +7,5 @@ ExecStart={repo}/.venv/bin/python -m gateway.dispatcher %i
 Environment=TZ=Asia/Shanghai
 Environment=PYTHONUNBUFFERED=1
 Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
-TimeoutStartSec=3900
+# 必须和 gateway/dispatcher.py 的 UNIT_TIMEOUT_S 一致(有测试锁住)
+TimeoutStartSec=14400
