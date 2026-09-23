@@ -125,3 +125,10 @@ def test_last_line_before_exit_is_kept(fcfg, tmp_path):
     for _ in range(5):                       # 退出竞态是偶发的,多跑几次
         r = run(fcfg, tmp_path, mode='ok')
         assert r.result is not None
+
+
+def test_extra_dirs_become_add_dir(fcfg):
+    fcfg.extra_dirs = ['/data/QTS/成片', '~/x']
+    argv = cr.build_argv(fcfg, 'p', 'sid', True)
+    i = [k for k, a in enumerate(argv) if a == '--add-dir']
+    assert [argv[k + 1] for k in i] == [fcfg.project_dir, '/data/QTS/成片', os.path.expanduser('~/x')]

@@ -98,6 +98,7 @@ FIELDS: list[tuple] = [
     ('hard_timeout_min', 'int', '一轮最长跑多久', False, ''),
     ('rotate_at_tokens', 'int', '上下文超过多少 token 就主动换新会话。0 = 关,靠自动压缩', False, ''),
     ('reply_in_thread', 'bool', '回复开不开话题。开=追问自动并进同一张卡;关=靠时间窗归并', False, ''),
+    ('extra_dirs', 'list', '除项目目录外还要让机器人读得到的目录,每行一个(如成片所在的 NFS)。受限权限下目录外一律读不到', False, ''),
     ('claude_bin', 'str', 'claude 可执行文件路径', False, ''),
     ('probe_timeout_sec', 'int', '探活最多等几秒。代理慢时调大,否则会频繁报「claude 连不上」', False, ''),
     ('permission_args', 'list', 'claude 的权限参数。skip 会连 settings.json 的 deny 清单一起绕过', False, ''),

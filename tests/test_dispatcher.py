@@ -291,3 +291,46 @@ def test_session_rotate_if(db):
     assert dbm.session_rotate_if(db, 'someone-else', 'x') is None
     b = dbm.session_rotate_if(db, a, 'x')
     assert b and dbm.session_get(db)['session_id'] == b
+
+
+class ReplyClient(FakeClient):
+    def __init__(self):
+        super().__init__(); self.replies = []
+    def reply_post(self, mid, content, in_thread=False):
+        self.replies.append((mid, content)); return 'om_fallback'
+
+
+def test_denied_and_unfinished_card_gets_feedback_not_redispatch(dcfg, monkeypatch):
+    """没权限:给提问的人一句说明、告警管理员、标人工处理。不能默默不回,也不能反复重派(只会再被拒)。"""
+    monkeypatch.setenv('FAKE_MODE', 'denied')
+    conn = dbm.connect(dcfg.paths.db_file); seed(conn, dcfg); conn.close()
+    c = ReplyClient()
+    dispatcher.run_once(dcfg, client=c, max_cards=5)
+    conn = dbm.connect(dcfg.paths.db_file)
+    it = dbm.get_issue(conn, 1)
+    assert it['state'] == 'stuck' and it['redispatch'] == 0 and '权限不足' in it['note']
+    assert len(c.replies) == 1 and c.replies[0][0] == 'om_0'                     # 回到提问那条消息下面
+    assert '没有权限' in json.dumps(c.replies[0][1], ensure_ascii=False)
+    assert any('权限拒绝' in t and 'python3 - <<EOF' in t for t in c.texts)       # 管理员收到原命令
+    assert conn.execute("SELECT COUNT(*) FROM errors WHERE kind='permission_denied'").fetchone()[0] == 1
+    assert [r['outcome'] for r in dbm.rounds(conn)] == ['stuck']
+
+
+def test_denied_but_bot_finished_itself(dcfg, tmp_path, monkeypatch):
+    """机器人自己已经在群里说明并收尾了,兜底就不再多说一遍。"""
+    import os
+    monkeypatch.setenv('FAKE_MODE', 'denied')
+    conn = dbm.connect(dcfg.paths.db_file); seed(conn, dcfg); conn.close()
+    hook = tmp_path / 'done.py'
+    hook.write_text("import sqlite3\n"
+                    f"c=sqlite3.connect({str(dcfg.paths.db_file)!r})\n"
+                    "c.execute(\"UPDATE issues SET state='answered' WHERE state='answering'\"); c.commit()\n")
+    os.environ['FAKE_HOOK'] = str(hook)
+    try:
+        c = ReplyClient()
+        dispatcher.run_once(dcfg, client=c, max_cards=1)
+    finally:
+        os.environ.pop('FAKE_HOOK')
+    conn = dbm.connect(dcfg.paths.db_file)
+    assert dbm.get_issue(conn, 1)['state'] == 'answered' and c.replies == []
+    assert conn.execute("SELECT COUNT(*) FROM errors WHERE kind='permission_denied'").fetchone()[0] == 1

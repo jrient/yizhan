@@ -29,6 +29,16 @@ if mode == 'split_line':
     sys.stdout.write(line[:20]); sys.stdout.flush(); time.sleep(0.6)
     sys.stdout.write(line[20:] + '\n'); sys.stdout.flush()
     sys.exit(0)
+if mode == 'denied':
+    # 本轮有操作被权限系统拒绝
+    hook = os.environ.get('FAKE_HOOK')
+    if hook:
+        exec(open(hook).read(), {'argv': argv})
+    print(json.dumps({'type': 'result', 'subtype': 'success', 'total_cost_usd': 0.1,
+                      'usage': {'output_tokens': 3},
+                      'permission_denials': [{'tool_name': 'Bash', 'tool_use_id': 't1',
+                                              'tool_input': {'command': 'python3 - <<EOF'}}]}), flush=True)
+    sys.exit(0)
 if mode == 'crash':
     sys.stderr.write('boom\n'); sys.exit(2)
 

@@ -1104,7 +1104,8 @@ function renderStatsCharts() {
   // Custom processing for chart 4 (stacked bar)
   const chart4 = chartConfigs[3];
   if (chart4.hasData) {
-    const ERROR_SLOT = { probe_failed:1, resume_failed:2, idle_killed:3, hard_killed:4, rc_nonzero:5, stuck:6, evidence_rejected:7, feishu_error:8 };
+    const ERROR_SLOT = { probe_failed:1, resume_failed:2, timeout:3, rc_nonzero:4,
+                     stuck:5, permission_denied:6, evidence_rejected:7, feishu_error:8 };  // 与 data.py 的 ERROR_ORDER 一一对应
     chart4.seriesNames = [];
     chart4.seriesArgs = [];
     chart4.hoverColors = [];

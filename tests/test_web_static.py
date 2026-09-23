@@ -80,3 +80,13 @@ def test_zero_is_rendered_not_dropped():
     """整数 0 是有效值(轮换阈值 0=关)。用 `val || ''` 会把 0 渲染成空。"""
     text = (STATIC / 'app.js').read_text()
     assert "value=\"${esc(val || '')}\" style=\"width:100%\"" not in text
+
+
+def test_error_slots_match_backend_order():
+    """颜色跟着错误种类走:前端槽位必须和后端固定顺序一一对应,且不超过 8 类。"""
+    from gateway.web.data import ERROR_ORDER
+    text = (STATIC / 'app.js').read_text()
+    m = re.search(r'const ERROR_SLOT = \{([^}]*)\}', text, re.S)
+    slots = dict((k.strip(), int(v)) for k, v in re.findall(r'(\w+)\s*:\s*(\d+)', m.group(1)))
+    assert len(ERROR_ORDER) <= 8
+    assert slots == {k: i + 1 for i, k in enumerate(ERROR_ORDER)}

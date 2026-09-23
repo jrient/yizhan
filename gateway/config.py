@@ -38,6 +38,9 @@ class Config:
     # 403 Request not allowed(2026-09-21 实测);systemd 服务没有这些变量,必须显式给。
     # 注意飞书接口不走代理(FeishuClient 关了 trust_env)。
     claude_env: dict = field(default_factory=dict)
+    # 除原项目外还要让 claude 读得到的目录(逐个 --add-dir)。受限权限模式下,
+    # 工作目录与 --add-dir 之外的路径一律读不到;drama-auto 抽帧要读 /data/QTS 下的成片。
+    extra_dirs: list = field(default_factory=list)
     # 回复是否开话题。开=追问天然并进同一张卡;关=靠(会话,发起人)+10 分钟窗口归并。
     reply_in_thread: bool = True
     paths: Paths = field(default=None, repr=False)  # type: ignore[assignment]

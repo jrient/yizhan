@@ -57,6 +57,8 @@ def build_env(cfg, extra: dict[str, str] | None = None) -> dict[str, str]:
 def build_argv(cfg, prompt: str, session_id: str | None, resume: bool) -> list[str]:
     argv = [cfg.claude_bin, '-p', prompt, '--output-format', 'stream-json', '--verbose',
             '--add-dir', cfg.project_dir]
+    for d in getattr(cfg, 'extra_dirs', None) or []:
+        argv += ['--add-dir', os.path.expanduser(d)]
     if session_id:
         argv += (['--resume', session_id] if resume else ['--session-id', session_id])
     argv += list(cfg.permission_args)

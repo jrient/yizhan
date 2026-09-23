@@ -384,12 +384,20 @@ def attachment_path(inst: str, key: str) -> Path:
 
 
 # ---- 统计 ----
+# 统计按「类」算,不按原始 kind:色板只有 8 个槽,超过 8 类必须合并,不能生成第 9 种颜色。
+# 两种超时合成一类,给「权限拒绝」腾出槽位。
+ERROR_CATEGORY = {
+    'probe_failed': 'probe_failed', 'resume_failed': 'resume_failed',
+    'idle_killed': 'timeout', 'hard_killed': 'timeout', 'rc_nonzero': 'rc_nonzero',
+    'stuck': 'stuck', 'permission_denied': 'permission_denied',
+    'evidence_rejected': 'evidence_rejected', 'feishu_error': 'feishu_error',
+}
 ERROR_LABELS = {
-    'probe_failed': '探活失败', 'resume_failed': '会话续接失败', 'idle_killed': '无输出被杀',
-    'hard_killed': '超时被杀', 'rc_nonzero': '异常退出', 'stuck': '卡死',
+    'probe_failed': '探活失败', 'resume_failed': '会话续接失败', 'timeout': '超时被杀',
+    'rc_nonzero': '异常退出', 'stuck': '卡死', 'permission_denied': '权限拒绝',
     'evidence_rejected': '证据门拦下', 'feishu_error': '飞书接口/长连接',
 }
-# 固定顺序:颜色跟着种类走,不跟排名走(筛选后幸存的系列不能换色)
+# 固定顺序:颜色跟着种类走,不跟排名走(筛选后幸存的系列不能换色)。与 app.js 的 ERROR_SLOT 一一对应。
 ERROR_ORDER = list(ERROR_LABELS)
 REPLY_TYPE_LABELS = {'frame': '画面', 'config': '配置', 'time': '时间', 'error': '报错',
                      'script': '剧本', 'other': '答疑'}
@@ -428,7 +436,7 @@ def stats(inst: str, days: int = 7) -> dict:
     has_errors = conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='errors'").fetchone()
     for kind, t in (conn.execute('SELECT kind, at FROM errors WHERE at>=?', (t0,)) if has_errors else []):
         errs[dk(t)] += 1
-        err_kind_day[kind][dk(t)] += 1
+        err_kind_day[ERROR_CATEGORY.get(kind, 'rc_nonzero')][dk(t)] += 1
     all_frs = []
     for created, first in conn.execute('SELECT i.created_at, (SELECT MIN(sent_at) FROM replies r '
                                        'WHERE r.issue_id=i.issue_id) FROM issues i WHERE i.created_at>=?', (t0,)):

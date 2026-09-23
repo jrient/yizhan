@@ -130,6 +130,12 @@ def process_card(conn, cfg, client, it) -> str:
                   f'主会话上下文到 {ctx_tokens} tokens,已轮换到 {new_sid}')
     if res.idle_killed or res.hard_killed:
         log.warning('卡 #%s 超时被杀 idle=%s hard=%s', iid, res.idle_killed, res.hard_killed)
+    denied = _denied_commands(res)
+    if denied:
+        _handle_denials(conn, cfg, client, iid, denied, started)
+        state = dbm.get_issue(conn, iid)['state']
+        _round(state)
+        return state
     state = cards.finish_card(conn, cfg, iid)
     _round(state)
     if state == 'stuck':
@@ -146,6 +152,56 @@ def process_card(conn, cfg, client, it) -> str:
 # 原来是 3900 秒,而一轮最多 20 张卡、每张最长 60 分钟,连着两张慢卡第二张就会在回复发到一半时被杀。
 UNIT_TIMEOUT_S = 14400
 RUN_MARGIN_S = 300
+
+
+def _denied_commands(res) -> list[str]:
+    """本轮被权限系统拒掉的操作。claude 的 result 行里有结构化的 permission_denials。"""
+    out = []
+    for d in (res.result or {}).get('permission_denials') or []:
+        inp = d.get('tool_input') or {}
+        what = inp.get('command') or inp.get('file_path') or inp.get('path') or str(inp)[:120]
+        out.append(f"{d.get('tool_name', '?')}: {what}")
+    return out
+
+
+PERM_FALLBACK_REPLY = ('这个问题我没能查完:需要用到的操作,机器人目前没有权限执行,所以相关结论没法核实,'
+                       '我不拿猜测补上。已通知管理员,放开权限后会重新处理这张卡。')
+
+
+def _handle_denials(conn, cfg, client, iid: int, denied: list[str], started: int):
+    """有操作被权限拒绝时的收尾。
+
+    要求(2026-09-23):没权限就给提问的人反馈,不能在 shell 里干等,也不能默默不回。
+    · 每条被拒都记进错误统计,并私聊管理员原命令,方便直接加进允许清单
+    · 机器人自己已经在群里说明并收尾(卡是 answered/waiting)→ 不再多说
+    · 卡没收尾 → 不走重派(再派一次只会再被拒一次),dispatcher 自己在群里回一句,把卡标成
+      需要人工处理(stuck);管理员放开权限后在控制台「重开」即可
+    """
+    for d in denied:
+        dbm.record_error(conn, 'permission_denied', d, iid)
+    alert(conn, client, cfg, f'perm_denied:{iid}',
+          f'卡 #{iid} 有 {len(denied)} 个操作被权限拒绝。确实需要的话,加进工作台 .claude/settings.json 的 allow:\n'
+          + '\n'.join(f'  · {d[:200]}' for d in denied[:10]))
+    it = dbm.get_issue(conn, iid)
+    if it['state'] in ('answered', 'waiting', 'closed'):
+        dbm.update_issue(conn, iid, lock_owner=None, lock_until=None)
+        log.info('卡 #%s 有 %d 次权限拒绝,机器人已自行收尾(%s)', iid, len(denied), it['state'])
+        return
+    said = conn.execute('SELECT COUNT(*) FROM replies WHERE issue_id=? AND sent_at>=?', (iid, started)).fetchone()[0]
+    if not said:
+        msgs = dbm.issue_messages(conn, iid)
+        if msgs:
+            try:
+                from .render import post_content
+                mid = client.reply_post(msgs[-1]['message_id'], post_content(PERM_FALLBACK_REPLY),
+                                        in_thread=cfg.reply_in_thread)
+                dbm.insert_reply(conn, iid, msgs[-1]['message_id'], mid, 'dispatcher', 'other',
+                                 '权限拒绝兜底:' + '; '.join(denied)[:300], PERM_FALLBACK_REPLY)
+            except Exception as e:
+                log.error('权限拒绝兜底回复发送失败: %s', e)
+    dbm.update_issue(conn, iid, state='stuck', lock_owner=None, lock_until=None,
+                     note='权限不足,等管理员放开后重开: ' + '; '.join(denied)[:300])
+    log.warning('卡 #%s 因权限拒绝未能处理完,已告知提问人并标记需人工处理', iid)
 
 
 class ProbeFailed(Exception):
