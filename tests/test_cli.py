@@ -143,3 +143,43 @@ def test_install_units_includes_web(inst_env, tmp_path, monkeypatch):
                      'yizhan-dispatcher@.timer', 'yizhan-web.service'}
     text = (fake_home / '.config' / 'systemd' / 'user' / 'yizhan-web.service').read_text()
     assert '-m gateway.web' in text and '{repo}' not in text
+
+
+def _journal(lines):
+    import json as _j
+    out = []
+    for us, msg in lines:
+        out.append(_j.dumps({'MESSAGE': msg, '__REALTIME_TIMESTAMP': str(us)}))
+    class R:
+        stdout = '\n'.join(out)
+    return R()
+
+
+def test_backfill_counts_each_failure_once(cfg, monkeypatch, capsys):
+    """一次探活失败在 journal 里有两行(告警一行 + main 一行),只能记一次。"""
+    lines = [
+        (1_000_000_000, 'INFO yizhan.alert alert[probe_failed] claude 探活失败,不动任何卡: 探活超时 30s'),
+        (1_000_000_500, 'WARNING yizhan.dispatcher 探活失败,本轮不动任何卡'),
+        (2_000_000_000, 'INFO yizhan.alert alert[probe_failed] 1h 内已发过,跳过: claude 探活失败'),
+        (3_000_000_000, 'WARNING yizhan.dispatcher 卡 #3 超时被杀 idle=True hard=False'),
+        (4_000_000_000, 'WARNING yizhan.dispatcher 卡 #4 超时被杀 idle=False hard=True'),
+        (5_000_000_000, 'INFO yizhan.dispatcher 卡 #5 收尾 → stuck (rc=0)'),
+    ]
+    monkeypatch.setattr(cli.subprocess, 'run', lambda *a, **k: _journal(lines))
+    cli.main(['backfill-errors', 'demo'])
+    conn = dbm.connect(cfg.paths.db_file)
+    got = dict(conn.execute('SELECT kind, COUNT(*) FROM errors GROUP BY kind').fetchall())
+    assert got == {'probe_failed': 2, 'idle_killed': 1, 'hard_killed': 1, 'stuck': 1}
+    cli.main(['backfill-errors', 'demo'])                  # 再跑一次不重复
+    assert conn.execute('SELECT COUNT(*) FROM errors').fetchone()[0] == 5
+
+
+def test_backfill_skips_period_already_recorded_at_runtime(cfg, monkeypatch):
+    """运行时开始自己记之后,journal 里同一次故障已有记录,不能再回溯一遍。"""
+    conn = dbm.connect(cfg.paths.db_file)
+    dbm.record_error(conn, 'probe_failed', '运行时记录', at=2_000_000)       # 2_000_000 ms
+    lines = [(1_000_000_000, 'alert[probe_failed] 早于运行时记录'),            # 1_000_000 ms → 回溯
+             (3_000_000_000, 'alert[probe_failed] 晚于运行时记录')]            # 3_000_000 ms → 跳过
+    monkeypatch.setattr(cli.subprocess, 'run', lambda *a, **k: _journal(lines))
+    cli.main(['backfill-errors', 'demo'])
+    assert conn.execute("SELECT COUNT(*) FROM errors WHERE detail LIKE '[journal 回溯]%'").fetchone()[0] == 1

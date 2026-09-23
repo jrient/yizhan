@@ -249,7 +249,18 @@ def cmd_backfill_errors(a) -> int:
     conn = dbm.connect(cfg.paths.db_file)
     p = subprocess.run(['journalctl', '--user', '-u', f'yizhan-dispatcher@{a.inst}.service',
                         '-o', 'json', '--no-pager'], capture_output=True, text=True)
-    patterns = {'探活失败': 'probe_failed', '超时被杀': 'hard_killed', '收尾 → stuck': 'stuck'}
+    # 每种故障只认「一次故障恰好一行」的那种日志(2026-09-23 审查发现原来会重复计):
+    #  · 探活失败:alert() 每次调用恰好打一行 alert[probe_failed](发出的 warning 或去重跳过的 info);
+    #    不认 main 的「探活失败,本轮不动任何卡」,那是同一次故障的第二行
+    #  · 超时:按 idle=True / hard=True 区分,原来一律记成 hard_killed
+    #  · 卡死:收尾那一行
+    patterns = [('alert[probe_failed]', 'probe_failed'),
+                ('超时被杀 idle=True', 'idle_killed'),
+                ('超时被杀 idle=False hard=True', 'hard_killed'),
+                ('收尾 → stuck', 'stuck')]
+    # 运行时开始自己记 errors 之后,journal 里的同一次故障已经有记录了,只回溯那之前的历史
+    r = conn.execute("SELECT MIN(at) FROM errors WHERE detail NOT LIKE '[journal 回溯]%'").fetchone()
+    cutoff = r[0] if r and r[0] else None
     added = skipped = 0
     for line in p.stdout.splitlines():
         try:
@@ -261,10 +272,12 @@ def cmd_backfill_errors(a) -> int:
             msg = bytes(msg).decode('utf-8', 'replace')
         if not msg:
             continue
-        kind = next((k for pat, k in patterns.items() if pat in msg), None)
+        kind = next((k for pat, k in patterns if pat in msg), None)
         if not kind:
             continue
         at = int(int(o['__REALTIME_TIMESTAMP']) / 1000)
+        if cutoff and at >= cutoff:
+            continue
         if conn.execute('SELECT 1 FROM errors WHERE kind=? AND at=?', (kind, at)).fetchone():
             skipped += 1
             continue

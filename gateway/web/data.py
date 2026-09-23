@@ -374,6 +374,11 @@ def attachment_path(inst: str, key: str) -> Path:
     p = (cfg.paths.attachments / safe).resolve()
     if not str(p).startswith(str(cfg.paths.attachments.resolve())):
         raise ValueError(f'附件名越界: {key!r}')
+    if not p.exists() and '.' not in safe:
+        # fgctl 下载时存成 <key>.png,卡详情里的链接用的是裸 key(2026-09-23 审查发现图片全 404)
+        png = p.with_name(safe + '.png')
+        if png.exists():
+            return png
     return p
 
 

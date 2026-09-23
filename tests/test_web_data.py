@@ -274,3 +274,11 @@ def test_stats_percentiles():
 def test_stats_clamps_range(cfg, db):
     assert data.stats('demo', 999)['range']['days'] == 90
     assert data.stats('demo', 0)['range']['days'] == 1
+
+
+def test_attachment_falls_back_to_png(cfg):
+    """fgctl 存成 <key>.png,卡详情链接用裸 key。原来图片全部 404。"""
+    cfg.paths.attachments.mkdir(parents=True, exist_ok=True)
+    (cfg.paths.attachments / 'img_k1.png').write_bytes(b'png')
+    assert data.attachment_path('demo', 'img_k1').name == 'img_k1.png'
+    assert data.attachment_path('demo', 'img_k1').exists()
