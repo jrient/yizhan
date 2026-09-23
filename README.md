@@ -4,6 +4,7 @@
 `claude -p --resume <固定会话>` 处理并回群。**常驻会话、非常驻进程。**
 
 - 设计:`docs/superpowers/specs/2026-09-21-yizhan-design.md`
+- 权限:`docs/权限.md`
 - 实施计划:`docs/superpowers/plans/2026-09-21-yizhan-gateway.md`
 
 ## 三个组件
@@ -64,16 +65,20 @@ http_proxy  = "http://127.0.0.1:7890"
 
 飞书接口不走代理,客户端已经关了 `trust_env`,两边互不影响。
 
-## 权限:第一天之后就换掉
+## 权限
 
-模板里的 `permission_args = ["--dangerously-skip-permissions"]` 只适合关起门来跑通,因为它
-**连工作台 settings.json 的 deny 清单一起绕过**,而群消息是不可信输入。跑通后改成:
+机器人每处理一张卡都唤起一次 `claude -p`,能做什么由权限模式和工作台的允许清单决定。
+新实例默认跳过权限,方便第一天调通;正式运行要切到受限模式:
 
 ```toml
 permission_args = ["--permission-mode", "dontAsk", "--permission-prompts", "none"]
 ```
 
-无头模式下未预批的调用直接被拒、不会挂住;拒绝会记日志,按日志补 allow 清单。
+受限模式下没预批的操作立即被拒,不会卡住;机器人会在群里告诉提问人哪一步做不了,
+dispatcher 兜底并私聊管理员原命令。drama-auto 已于 2026-09-23 切换。
+
+两种模式的区别、被拒后的完整流程、允许清单的内容与增补方法、做不到的事、预演验证方法,
+都在 [`docs/权限.md`](docs/权限.md)。
 
 ## Web 控制台
 
