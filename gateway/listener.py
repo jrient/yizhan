@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import subprocess
 import sys
 import threading
@@ -43,6 +44,64 @@ def start_heartbeat(db_file, stop: threading.Event | None = None, period: float 
             conn.close()
 
     t = threading.Thread(target=beat, name='heartbeat', daemon=True)
+    t.start()
+    return stop, t
+
+
+WS_CHECK_SECONDS = 600
+WS_LAG_MS = 2 * 60_000          # 推送延迟余量:2 分钟内的新消息不算漏
+WS_WINDOW_MS = 30 * 60_000      # 只对账最近 30 分钟
+
+
+def ws_missing(conn, client, chat_ids, now_ms: int) -> list[str]:
+    """飞书上有、库里没有的真人消息。有就说明长连接漏了。
+
+    心跳改成定时打之后只能证明进程活着:wss 断了但进程还在,watchdog 什么都发现不了
+    (2026-09-23 审查发现)。对账才能证明「消息确实在进来」。
+    """
+    missing = []
+    for chat_id in chat_ids:
+        try:
+            items = client.list_messages('chat', chat_id, page_size=20, sort='ByCreateTimeDesc', max_pages=1)
+        except Exception as e:
+            log.warning('对账拉取 %s 失败: %s', chat_id, e)
+            continue
+        for it in items:
+            t = int(it.get('create_time') or 0)
+            if not (now_ms - WS_WINDOW_MS <= t <= now_ms - WS_LAG_MS):
+                continue
+            sender = it.get('sender') or {}
+            # 机器人自己的、以及「某某邀请某某进群」这类系统消息,本来就不进库,不算漏
+            if sender.get('sender_type') == 'app' or it.get('msg_type') == 'system' or not sender.get('id'):
+                continue
+            if not dbm.get_event(conn, it['message_id']):
+                missing.append(it['message_id'])
+    return missing
+
+
+def start_ws_watchdog(cfg, db_file, client, period: float = WS_CHECK_SECONDS, exit_fn=None,
+                      stop: threading.Event | None = None):
+    """定期对账;发现漏消息就记错误、告警、退出进程,由 systemd 重启,启动补拉会把漏的收回来。"""
+    stop = stop or threading.Event()
+    exit_fn = exit_fn or (lambda: os._exit(3))
+
+    def run():
+        conn = dbm.connect(db_file)
+        try:
+            while not stop.wait(period):
+                miss = ws_missing(conn, client, cfg.group_allow, dbm.now_ms())
+                if not miss:
+                    continue
+                msg = f'长连接漏了 {len(miss)} 条消息({miss[:3]}…),重启 listener 补拉'
+                log.error(msg)
+                dbm.record_error(conn, 'feishu_error', msg)
+                alert(conn, client, cfg, 'ws_missed', msg)
+                exit_fn()
+                return
+        finally:
+            conn.close()
+
+    t = threading.Thread(target=run, name='ws-watchdog', daemon=True)
     t.start()
     return stop, t
 
@@ -116,6 +175,14 @@ def handle_bot_added(conn, cfg, client, chat_id: str, chat_type='group'):
     return is_new
 
 
+def _after(cursor_ms: int) -> int | None:
+    """游标之后一毫秒开始拉;没有游标返回 None(从头拉)。
+
+    原来写的是 `cursor + 1 or None`,永远是非零整数,None 那条分支从来走不到(2026-09-23 审查发现)。
+    """
+    return cursor_ms + 1 if cursor_ms else None
+
+
 def backfill(conn, cfg, client: FeishuClient, bot_open_id: str) -> int:
     """启动补拉:长连接断开期间的消息按不重投设计,自己按 cursor 拉差量。"""
     n = 0
@@ -135,7 +202,7 @@ def backfill(conn, cfg, client: FeishuClient, bot_open_id: str) -> int:
                               (chat_id, dbm.now_ms() - 3 * 86400_000)).fetchall():
             try:
                 for it in client.list_messages('thread', t[0], page_size=50,
-                                               start_ms=dbm.get_cursor(conn, t[0]) + 1 or None):
+                                               start_ms=_after(dbm.get_cursor(conn, t[0]))):
                     ev = from_api_item(it, 'group', bot_open_id)
                     if handle_message(conn, cfg, ev, bot_open_id, trigger=None):
                         n += 1
@@ -162,6 +229,7 @@ def main(argv=None) -> int:
     log.info('bot open_id=%s;群白名单=%s', bot, cfg.group_allow)
     dbm.heartbeat_touch(conn)
     start_heartbeat(cfg.paths.db_file)
+    start_ws_watchdog(cfg, cfg.paths.db_file, client)
     for chat_id in cfg.group_allow:
         sync_members(conn, client, chat_id, force=True)
     backfill(conn, cfg, client, bot)

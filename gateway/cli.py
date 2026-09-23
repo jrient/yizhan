@@ -107,9 +107,13 @@ def cmd_init(a) -> int:
             shutil.copy2(src / 'SKILL.md', dstdir / 'legacy-skill.md'); n += 1
         print(f'  已带入旧 skill 的参考资料 → {dstdir}')
 
-    if not paths.config_file.exists() or a.force:
+    # --force 只刷新工作台文件,**绝不**覆盖已有配置:里面是填好的密钥和白名单,
+    # 用模板一覆盖就全丢了(2026-09-23 审查发现)。要重置配置请手工删掉再 init。
+    if not paths.config_file.exists():
         _render(TEMPLATES / 'config.toml', paths.config_file, mapping)
         paths.config_file.chmod(0o600)
+    elif a.force:
+        print(f'  配置已存在,--force 不会覆盖它: {paths.config_file}')
     conn = dbm.connect(paths.db_file); conn.close()
     if trust_workspace(paths.workspace):
         print('  已把工作台标为可信(否则 settings.json 的允许清单会被忽略)')

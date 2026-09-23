@@ -152,3 +152,11 @@ def test_evidence_rejection_is_recorded(ctx):
     rows = ctx.db.execute("SELECT kind, issue_id, detail FROM errors").fetchall()
     assert len(rows) == 1 and rows[0]['kind'] == 'evidence_rejected'
     assert rows[0]['issue_id'] == 1 and '托词' in rows[0]['detail']
+
+
+def test_card_header_shows_name_and_open_id(ctx, capsys):
+    """成员名同步后只打印名字,机器人照 skill 文档抄不到 open_id。"""
+    iid = add_card(ctx)
+    ctx.db.execute("INSERT OR REPLACE INTO members(open_id,name) VALUES('ou_a','张三')")
+    fgctl.main(['card', str(iid)])
+    assert '发起人=张三 (ou_a)' in capsys.readouterr().out

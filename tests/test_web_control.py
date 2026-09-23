@@ -261,3 +261,14 @@ def test_multiline_list_from_form_is_split(cfg):
 
 def test_probe_timeout_is_editable():
     assert any(f['name'] == 'probe_timeout_sec' for f in control.field_meta())
+
+
+def test_reopen_clears_defer_count(cfg, sysctl):
+    conn = dbm.connect(cfg.paths.db_file)
+    iid = dbm.create_issue(conn, 'oc_group1', None, 'ou_a', 'k', dbm.now_ms())
+    dbm.update_issue(conn, iid, state='stuck', defer_count=3, woke_from_defer=1)
+    conn.close()
+    assert control.action('demo', 'reopen-card', card_id=iid)['ok']
+    conn = dbm.connect(cfg.paths.db_file)
+    it = dbm.get_issue(conn, iid)
+    assert it['defer_count'] == 0 and it['woke_from_defer'] == 0 and it['state'] == 'open'

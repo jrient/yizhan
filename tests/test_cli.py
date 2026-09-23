@@ -183,3 +183,11 @@ def test_backfill_skips_period_already_recorded_at_runtime(cfg, monkeypatch):
     monkeypatch.setattr(cli.subprocess, 'run', lambda *a, **k: _journal(lines))
     cli.main(['backfill-errors', 'demo'])
     assert conn.execute("SELECT COUNT(*) FROM errors WHERE detail LIKE '[journal 回溯]%'").fetchone()[0] == 1
+
+
+def test_init_force_never_overwrites_config(cfg, capsys):
+    """--force 用模板覆盖会把填好的密钥和白名单全丢掉。"""
+    before = cfg.paths.config_file.read_text()
+    cli.main(['init', 'demo', '--project', cfg.project_dir, '--force'])
+    assert cfg.paths.config_file.read_text() == before
+    assert '不会覆盖' in capsys.readouterr().out

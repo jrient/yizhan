@@ -37,7 +37,7 @@ fgctl defer <N> --until 2h --note "等确认"   # 答不了先挂起
 
 | 写法 | 什么时候用 |
 |---|---|
-| `@ou_xxxxxxxx` | 任何时候都行。`fgctl card` 打印的发起人就是 open_id,直接抄 |
+| `@ou_xxxxxxxx` | 任何时候都行。`fgctl card` 第一行的发起人写成「名字 (ou_xxx)」,括号里就是 open_id,直接抄 |
 | `@名字` | 这个人在 `members` 表里(被人 @ 过或机器人见过)才认得出,认不出会原样显示成普通文字 |
 
 拿不准就用 open_id,它一定对。正文里还支持 `**加粗**` 和 Markdown 表格(表格会自动排成等宽代码块)。

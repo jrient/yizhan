@@ -65,13 +65,21 @@ def fmt_event(ctx: Ctx, r, prefix='') -> str:
     return line
 
 
+def _who(ctx: Ctx, open_id: str | None) -> str:
+    """名字和 open_id 都给:认得出名字就 @名字,拿不准就 @ou_xxx,两种写法都能直接抄。"""
+    if not open_id:
+        return '?'
+    name = dbm.member_name(ctx.db, open_id)
+    return f'{name} ({open_id})' if name else open_id
+
+
 def cmd_card(ctx: Ctx, a):
     it = dbm.get_issue(ctx.db, a.issue_id)
     if it is None:
         sys.exit(f'没有卡 #{a.issue_id}')
     msgs = dbm.issue_messages(ctx.db, a.issue_id)
     print(f"== 卡 #{a.issue_id} [{it['state']}] chat={it['chat_id']} thread={it['thread_id'] or '-'} "
-          f"发起人={dbm.member_name(ctx.db, it['sender_id']) or it['sender_id']} 建于 {ts(it['created_at'])}")
+          f"发起人={_who(ctx, it['sender_id'])} 建于 {ts(it['created_at'])}")
     if it['note']:
         print(f"   备注: {it['note']}")
     # 已发回复放在消息前面:先知道自己说过什么,才不会重复回答(2026-09-21 卡 #8 的教训)

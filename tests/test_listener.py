@@ -123,3 +123,57 @@ def test_bot_added_syncs_members(db, cfg):
     c = MemberClient({'ou_x': '新同事'})
     listener.handle_bot_added(db, cfg, c, 'oc_group1')
     assert dbm.member_name(db, 'ou_x') == '新同事'
+
+
+def test_after_cursor():
+    assert listener._after(0) is None
+    assert listener._after(1000) == 1001
+
+
+class ListClient:
+    def __init__(self, items): self.items = items
+    def list_messages(self, *a, **k): return self.items
+    def send_text(self, *a): return 'om'
+
+
+def _api(mid, t, app=False):
+    return {'message_id': mid, 'create_time': str(t),
+            'sender': {'sender_type': 'app' if app else 'user', 'id': 'ou_x'}}
+
+
+def test_ws_missing_detects_messages_not_in_db(db, cfg):
+    """心跳只能证明进程活着;对账才能证明消息确实在进来。"""
+    now = dbm.now_ms()
+    dbm.insert_event(db, ev('om_have', create_time=now - 5 * 60_000))
+    c = ListClient([
+        _api('om_have', now - 5 * 60_000),        # 已入库
+        _api('om_lost', now - 6 * 60_000),        # 漏了
+        _api('om_bot', now - 6 * 60_000, app=True),  # 机器人自己的,本来就不入库
+        _api('om_fresh', now - 30_000),           # 刚发的,还在推送延迟余量内
+        _api('om_old', now - 3 * 3600_000),       # 太久以前,不在对账窗口
+        {'message_id': 'om_sys', 'create_time': str(now - 6 * 60_000), 'msg_type': 'system',
+         'sender': {'sender_type': '', 'id': ''}},  # 进群通知,本来就不进库
+    ])
+    assert listener.ws_missing(db, c, ['oc_group1'], now) == ['om_lost']
+
+
+def test_ws_watchdog_exits_on_missed_messages(cfg, db):
+    import threading
+    now = dbm.now_ms()
+    exited = threading.Event()
+    stop, t = listener.start_ws_watchdog(cfg, cfg.paths.db_file, ListClient([_api('om_lost', now - 6 * 60_000)]),
+                                         period=0.02, exit_fn=exited.set)
+    assert exited.wait(3)
+    stop.set(); t.join(timeout=2)
+    conn = dbm.connect(cfg.paths.db_file)
+    assert conn.execute("SELECT COUNT(*) FROM errors WHERE kind='feishu_error'").fetchone()[0] == 1
+    assert conn.execute("SELECT COUNT(*) FROM alerts WHERE kind='ws_missed'").fetchone()[0] == 1
+
+
+def test_ws_watchdog_quiet_when_all_present(cfg, db):
+    import threading, time as _t
+    exited = threading.Event()
+    stop, t = listener.start_ws_watchdog(cfg, cfg.paths.db_file, ListClient([]), period=0.02, exit_fn=exited.set)
+    _t.sleep(0.2)
+    stop.set(); t.join(timeout=2)
+    assert not exited.is_set()

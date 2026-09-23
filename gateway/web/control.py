@@ -72,7 +72,9 @@ def _reopen_card(inst: str, card_id: int) -> dict:
             return {'ok': False, 'message': f'没有卡 #{card_id}'}
         if it['state'] != 'stuck':
             return {'ok': False, 'message': f"卡 #{card_id} 现在是 {it['state']},只有 stuck 的卡才需要重开"}
-        dbm.update_issue(conn, card_id, state='open', redispatch=0, lock_owner=None, lock_until=None)
+        # 挂起次数也要清零:因挂起次数用完而卡死的卡,重开后再挂起一次就又被判卡死
+        dbm.update_issue(conn, card_id, state='open', redispatch=0, defer_count=0, woke_from_defer=0,
+                         defer_until=None, lock_owner=None, lock_until=None)
         return {'ok': True, 'message': f'卡 #{card_id} 已重开,重派次数清零'}
     finally:
         conn.close()

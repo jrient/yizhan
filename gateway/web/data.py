@@ -116,6 +116,7 @@ _ALERT_LABELS = {
     'stuck': '卡死',
     'stale_open': '长时间未处理',
     'defer_exhausted': '挂起次数用完',
+    'ws_missed': '长连接漏消息',
 }
 RECENT_ALERT_MS = 24 * 3600_000       # 卡片墙只挂 24 小时内的告警,旧的不再红着误导人
 
@@ -386,7 +387,7 @@ def attachment_path(inst: str, key: str) -> Path:
 ERROR_LABELS = {
     'probe_failed': '探活失败', 'resume_failed': '会话续接失败', 'idle_killed': '无输出被杀',
     'hard_killed': '超时被杀', 'rc_nonzero': '异常退出', 'stuck': '卡死',
-    'evidence_rejected': '证据门拦下', 'feishu_error': '飞书接口失败',
+    'evidence_rejected': '证据门拦下', 'feishu_error': '飞书接口/长连接',
 }
 # 固定顺序:颜色跟着种类走,不跟排名走(筛选后幸存的系列不能换色)
 ERROR_ORDER = list(ERROR_LABELS)
