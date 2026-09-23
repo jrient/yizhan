@@ -17,6 +17,18 @@ if mode == 'resume_fail' and '--resume' in argv:
     sys.exit(1)
 if mode == 'hang':
     time.sleep(300)
+if mode == 'spam_stderr':
+    # 写满 stderr 管道(远超 64KB)。没人实时读的话进程会卡死在这里
+    for _ in range(4000):
+        sys.stderr.write('warning: ' + 'x' * 60 + '\n')
+    sys.stderr.flush()
+if mode == 'split_line':
+    # result 行分两次写,中间停一下:读的人只拿到半行时不能把它丢掉
+    line = json.dumps({'type': 'result', 'subtype': 'success', 'total_cost_usd': 0.5,
+                       'usage': {'output_tokens': 7}})
+    sys.stdout.write(line[:20]); sys.stdout.flush(); time.sleep(0.6)
+    sys.stdout.write(line[20:] + '\n'); sys.stdout.flush()
+    sys.exit(0)
 if mode == 'crash':
     sys.stderr.write('boom\n'); sys.exit(2)
 

@@ -102,3 +102,26 @@ def test_claude_env_injected(fcfg, tmp_path, monkeypatch):
     assert env['https_proxy'] == 'http://127.0.0.1:7890'
     assert env['TZ'] == 'Asia/Shanghai' and env['YIZHAN_INST'] == 'demo'
     assert 'CLAUDECODE' not in env
+
+
+def test_big_stderr_does_not_hang(fcfg, tmp_path):
+    """stderr 刷 200KB+:原来没人实时读,管道写满后进程卡死,最后被当成无响应杀掉。"""
+    fcfg.idle_timeout_min = 0.5
+    t0 = time.time()
+    r = run(fcfg, tmp_path, mode='spam_stderr')
+    assert r.ok and not r.idle_killed and time.time() - t0 < 10
+    assert r.result['result'] == 'done'
+    assert r.stderr.endswith('\n') and len(r.stderr) <= 4000         # 只留尾巴
+
+
+def test_line_written_in_two_chunks_is_not_lost(fcfg, tmp_path):
+    """半行不能被当成坏 JSON 丢掉,否则本轮成本和用量都记成空。"""
+    r = run(fcfg, tmp_path, mode='split_line')
+    assert r.result is not None and r.result['total_cost_usd'] == 0.5
+    assert r.usage == {'output_tokens': 7}
+
+
+def test_last_line_before_exit_is_kept(fcfg, tmp_path):
+    for _ in range(5):                       # 退出竞态是偶发的,多跑几次
+        r = run(fcfg, tmp_path, mode='ok')
+        assert r.result is not None

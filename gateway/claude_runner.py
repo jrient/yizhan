@@ -5,9 +5,12 @@ spawn 前剥 CLAUDECODE 等环境变量(否则从 Claude 会话内启动会报 n
 """
 from __future__ import annotations
 
+import collections
 import json
 import logging
 import os
+import queue
+import threading
 import signal
 import subprocess
 import time
@@ -71,39 +74,77 @@ def run_claude(cfg, workspace: Path, prompt: str, session_id: str | None, *, res
     res = RunResult(rc=-1)
     start = last = time.time()
     lf = open(log_file, 'a', encoding='utf-8') if log_file else None
+    # 两个读线程,阻塞式逐行读,主循环从队列取。原来是非阻塞 readline 加 poll(),有两个坑
+    # (2026-09-23 审查发现):
+    #  · 非阻塞 readline 可能只拿到半行,json 解析失败就被丢了,result 行丢了本轮就没有成本;
+    #  · readline 刚返回空、进程恰好退出就 break,缓冲里最后几行没读;
+    #  · stderr 只在结束后读一次,claude 写满 64KB 管道就卡死,15 分钟后被当成无响应杀掉。
+    q: queue.Queue = queue.Queue()
+    readers = [threading.Thread(target=_pump, args=(proc.stdout, q, 'out'), daemon=True),
+               threading.Thread(target=_pump, args=(proc.stderr, q, 'err'), daemon=True)]
+    for t in readers:
+        t.start()
+    err_tail: collections.deque = collections.deque(maxlen=400)
+    open_streams = {'out', 'err'}
+    exited_at = None
+
+    def handle_out(line: str):
+        if lf:
+            lf.write(line if line.endswith('\n') else line + '\n'); lf.flush()
+        try:
+            obj = json.loads(line)
+        except Exception:
+            return
+        res.lines.append(obj)
+        if obj.get('type') == 'result':
+            res.result = obj
+            res.usage = obj.get('usage')
+
     try:
-        os.set_blocking(proc.stdout.fileno(), False)
-        while True:
-            line = proc.stdout.readline()
-            if line:
-                last = time.time()
-                if lf:
-                    lf.write(line); lf.flush()
-                try:
-                    obj = json.loads(line)
-                except Exception:
-                    continue
-                res.lines.append(obj)
-                if obj.get('type') == 'result':
-                    res.result = obj
-                    res.usage = obj.get('usage')
-            else:
-                if proc.poll() is not None:
-                    break
+        while open_streams:
+            try:
+                tag, line = q.get(timeout=0.5)
+            except queue.Empty:
                 now = time.time()
+                if proc.poll() is not None:
+                    # 进程已退出但流还没关:多半是它拉起的子进程继承了管道。给 3 秒收尾就走,
+                    # 不能一直等到空闲超时
+                    exited_at = exited_at or now
+                    if now - exited_at > 3:
+                        break
+                    continue
                 if now - last > idle_limit:
                     res.idle_killed = True; break
                 if now - start > hard_limit:
                     res.hard_killed = True; break
-                time.sleep(0.2)
+                continue
+            if line is None:
+                open_streams.discard(tag)
+                continue
+            if tag == 'err':
+                err_tail.append(line)          # stderr 不算「有输出」,空闲只看 stdout
+                continue
+            last = time.time()
+            handle_out(line)
     finally:
         if res.idle_killed or res.hard_killed:
             _kill_group(proc)
         try:
-            res.stderr = (proc.stderr.read() or '')[-4000:]
-        except Exception:
-            pass
-        res.rc = proc.wait()
+            res.rc = proc.wait(timeout=30)
+        except subprocess.TimeoutExpired:
+            _kill_group(proc)
+            res.rc = proc.wait()
+        for t in readers:
+            t.join(timeout=5)
+        while True:                            # 被杀或提前退出后,队列里剩下的也收完
+            try:
+                tag, line = q.get_nowait()
+            except queue.Empty:
+                break
+            if line is None:
+                continue
+            (err_tail.append if tag == 'err' else handle_out)(line)
+        res.stderr = ''.join(err_tail)[-4000:]
         if lf:
             lf.close()
     res.context_tokens = context_tokens(res.lines)
@@ -131,6 +172,17 @@ def context_tokens(lines: list[dict]) -> int:
         best = max(best, sum(int(u.get(k) or 0) for k in
                              ('input_tokens', 'cache_read_input_tokens', 'cache_creation_input_tokens')))
     return best
+
+
+def _pump(stream, q: queue.Queue, tag: str):
+    """一个读线程:逐行读到 EOF,每行放进队列,最后放一个 None 表示这条流结束。"""
+    try:
+        for line in iter(stream.readline, ''):
+            q.put((tag, line))
+    except (ValueError, OSError):
+        pass                                   # 流已被关闭
+    finally:
+        q.put((tag, None))
 
 
 def _kill_group(proc):
