@@ -54,3 +54,17 @@ def test_no_escaped_template_placeholders():
     """普通模板串里的 \\${x} 会原样输出成 '${x}' 字面文本。"""
     text = (STATIC / 'app.js').read_text()
     assert '\\${' not in text and '\\`' not in text
+
+
+UNTRUSTED = ('preview', 'text', 'summary', 'evidence', 'sender_name', 'note', 'detail', 'reason', 'label', 'name')
+
+
+def test_untrusted_fields_are_escaped():
+    """群消息来的字段必须过 esc() 才能进 innerHTML(2026-09-23 修过一次 XSS)。
+
+    群里任何人发一条 <img onerror=…>,打开控制台的人就会执行它,而控制台能暂停服务、改配置。
+    这里抓的是模板串里裸插的 ${x.preview} 这类写法。
+    """
+    text = (STATIC / 'app.js').read_text()
+    raw = re.findall(r'\$\{\s*[\w.]+\.(' + '|'.join(UNTRUSTED) + r')\s*\}', text)
+    assert not raw, f'这些字段没过 esc() 就插进了 HTML: {sorted(set(raw))}'
