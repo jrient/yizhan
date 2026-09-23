@@ -375,3 +375,107 @@ def attachment_path(inst: str, key: str) -> Path:
     if not str(p).startswith(str(cfg.paths.attachments.resolve())):
         raise ValueError(f'附件名越界: {key!r}')
     return p
+
+
+# ---- 统计 ----
+ERROR_LABELS = {
+    'probe_failed': '探活失败', 'resume_failed': '会话续接失败', 'idle_killed': '无输出被杀',
+    'hard_killed': '超时被杀', 'rc_nonzero': '异常退出', 'stuck': '卡死',
+    'evidence_rejected': '证据门拦下', 'feishu_error': '飞书接口失败',
+}
+# 固定顺序:颜色跟着种类走,不跟排名走(筛选后幸存的系列不能换色)
+ERROR_ORDER = list(ERROR_LABELS)
+REPLY_TYPE_LABELS = {'frame': '画面', 'config': '配置', 'time': '时间', 'error': '报错',
+                     'script': '剧本', 'other': '答疑'}
+
+
+def _pct(vals: list[float], p: float) -> float | None:
+    if not vals:
+        return None
+    v = sorted(vals)
+    k = (len(v) - 1) * p
+    lo, hi = int(k), min(int(k) + 1, len(v) - 1)
+    return round(v[lo] + (v[hi] - v[lo]) * (k - lo), 1)
+
+
+def stats(inst: str, days: int = 7) -> dict:
+    """统计页的全部数据。按本地时区的自然日分桶,没数据的日子补 0(图上要看得出「那天没活」)。"""
+    from collections import Counter, defaultdict
+    days = max(1, min(int(days), 90))
+    cfg, conn = _conn_or_raise(inst)
+    today0 = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    start = today0 - timedelta(days=days - 1)
+    t0 = int(start.timestamp() * 1000)
+    day_keys = [(start + timedelta(days=i)).strftime('%m-%d') for i in range(days)]
+    dk = lambda ms: datetime.fromtimestamp(ms / 1000).strftime('%m-%d')
+
+    msgs, cards_n, reps, cost, errs = Counter(), Counter(), Counter(), defaultdict(float), Counter()
+    err_kind_day: dict[str, Counter] = defaultdict(Counter)
+    frs_by_day: dict[str, list] = defaultdict(list)
+
+    for (t,) in conn.execute("SELECT create_time FROM events WHERE create_time>=? AND sender_type!='app'", (t0,)):
+        msgs[dk(t)] += 1
+    for (t,) in conn.execute('SELECT sent_at FROM replies WHERE sent_at>=?', (t0,)):
+        reps[dk(t)] += 1
+    for t, c in conn.execute('SELECT started_at, cost_usd FROM rounds WHERE started_at>=?', (t0,)):
+        cost[dk(t)] += c or 0.0
+    has_errors = conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='errors'").fetchone()
+    for kind, t in (conn.execute('SELECT kind, at FROM errors WHERE at>=?', (t0,)) if has_errors else []):
+        errs[dk(t)] += 1
+        err_kind_day[kind][dk(t)] += 1
+    all_frs = []
+    for created, first in conn.execute('SELECT i.created_at, (SELECT MIN(sent_at) FROM replies r '
+                                       'WHERE r.issue_id=i.issue_id) FROM issues i WHERE i.created_at>=?', (t0,)):
+        cards_n[dk(created)] += 1
+        if first:
+            s = (first - created) / 1000
+            frs_by_day[dk(created)].append(s)
+            all_frs.append(s)
+
+    daily = [{'day': d, 'msgs': msgs[d], 'cards': cards_n[d], 'replies': reps[d],
+              'cost_usd': round(cost[d], 2), 'errors': errs[d],
+              'first_reply_p50_s': _pct(frs_by_day[d], 0.5),
+              'first_reply_p90_s': _pct(frs_by_day[d], 0.9)} for d in day_keys]
+
+    present = [k for k in ERROR_ORDER if err_kind_day.get(k)] + \
+              sorted(k for k in err_kind_day if k not in ERROR_ORDER)
+    errors_by_kind = [{'kind': k, 'label': ERROR_LABELS.get(k, k),
+                       'daily': [err_kind_day[k][d] for d in day_keys],
+                       'total': sum(err_kind_day[k].values())} for k in present]
+
+    rtypes = Counter()
+    for (ty,) in conn.execute('SELECT type FROM replies WHERE sent_at>=?', (t0,)):
+        for one in (ty or 'other').split():
+            rtypes[one] += 1
+    reply_types = [{'type': k, 'label': REPLY_TYPE_LABELS.get(k, k), 'n': n}
+                   for k, n in rtypes.most_common()]
+
+    snd = Counter(r[0] for r in conn.execute('SELECT sender_id FROM issues WHERE created_at>=?', (t0,)))
+    top = snd.most_common(5)
+    senders = [{'name': _sender_name(conn, oid), 'n': n} for oid, n in top]
+    rest = sum(snd.values()) - sum(n for _, n in top)
+    if rest:
+        senders.append({'name': '其他', 'n': rest})
+
+    context = [{'at': r['started_at'], 'issue_id': r['issue_id'], 'context_tokens': r['context_tokens'],
+                'cost_usd': r['cost_usd'], 'duration_s': round((r['ended_at'] - r['started_at']) / 1000)}
+               for r in conn.execute('SELECT * FROM rounds WHERE started_at>=? ORDER BY started_at', (t0,))]
+
+    first_round = conn.execute('SELECT MIN(started_at) FROM rounds').fetchone()[0]
+    first_error = conn.execute('SELECT MIN(at) FROM errors').fetchone()[0] if has_errors else None
+    n_cards = sum(cards_n.values())
+    answered = conn.execute("SELECT COUNT(*) FROM issues WHERE created_at>=? AND state IN ('answered','closed')",
+                            (t0,)).fetchone()[0]
+    conn.close()
+    return {
+        'range': {'days': days, 'start': day_keys[0], 'end': day_keys[-1]},
+        'kpis': {'msgs': sum(msgs.values()), 'cards': n_cards, 'replies': sum(reps.values()),
+                 'cost_usd': round(sum(cost.values()), 2), 'errors': sum(errs.values()),
+                 'evidence_rejected': sum(err_kind_day['evidence_rejected'].values()),
+                 'first_reply_p50_s': _pct(all_frs, 0.5), 'first_reply_p90_s': _pct(all_frs, 0.9),
+                 'answered_rate': round(answered / n_cards, 3) if n_cards else None},
+        'daily': daily, 'errors_by_kind': errors_by_kind, 'reply_types': reply_types,
+        'senders': senders, 'context': context,
+        # 数据从什么时候开始有的:页面要说清楚,免得把「没记录」读成「是 0」
+        'coverage': {'cost_since': first_round, 'errors_since': first_error},
+    }

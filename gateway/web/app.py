@@ -160,6 +160,14 @@ def create_app(settings: WebSettings | None = None) -> FastAPI:
         except data.DbBroken as e:
             raise HTTPException(409, str(e))
 
+    @app.get('/api/i/{inst}/stats')
+    def api_stats(inst: str, days: int = 7):
+        _guard_inst(inst)
+        try:
+            return data.stats(inst, days)
+        except data.DbBroken as e:
+            raise HTTPException(409, str(e))
+
     @app.get('/api/i/{inst}/config')
     def api_config_read(inst: str):
         _guard_inst(inst)

@@ -239,6 +239,41 @@ def cmd_web_init(a) -> int:
     return 0
 
 
+def cmd_backfill_errors(a) -> int:
+    """从 journald 回溯历史错误进 errors 表。可重复跑,不会重复记。
+
+    errors 表是 2026-09-23 才加的,之前的探活失败只在 journal 里有;告警表每小时去重,不能用来统计。
+    """
+    import json as _json
+    cfg = configmod.load(a.inst)
+    conn = dbm.connect(cfg.paths.db_file)
+    p = subprocess.run(['journalctl', '--user', '-u', f'yizhan-dispatcher@{a.inst}.service',
+                        '-o', 'json', '--no-pager'], capture_output=True, text=True)
+    patterns = {'探活失败': 'probe_failed', '超时被杀': 'hard_killed', '收尾 → stuck': 'stuck'}
+    added = skipped = 0
+    for line in p.stdout.splitlines():
+        try:
+            o = _json.loads(line)
+        except ValueError:
+            continue
+        msg = o.get('MESSAGE')
+        if isinstance(msg, list):
+            msg = bytes(msg).decode('utf-8', 'replace')
+        if not msg:
+            continue
+        kind = next((k for pat, k in patterns.items() if pat in msg), None)
+        if not kind:
+            continue
+        at = int(int(o['__REALTIME_TIMESTAMP']) / 1000)
+        if conn.execute('SELECT 1 FROM errors WHERE kind=? AND at=?', (kind, at)).fetchone():
+            skipped += 1
+            continue
+        dbm.record_error(conn, kind, '[journal 回溯] ' + msg.split('yizhan.')[-1][:300], at=at)
+        added += 1
+    print(f'回溯完成:新增 {added} 条,已存在跳过 {skipped} 条')
+    return 0
+
+
 def cmd_install_units(a) -> int:
     dst = Path(os.path.expanduser('~/.config/systemd/user'))
     dst.mkdir(parents=True, exist_ok=True)
@@ -280,6 +315,8 @@ def main(argv=None) -> int:
     s.add_argument('--host', default='0.0.0.0')
     s.add_argument('--force', action='store_true', help='覆盖已有配置(会换口令)')
     s.set_defaults(fn=cmd_web_init)
+    s = sub.add_parser('backfill-errors', help='从 journal 回溯历史错误进统计(可重复跑)')
+    s.add_argument('inst'); s.set_defaults(fn=cmd_backfill_errors)
     s = sub.add_parser('install-units', help='把 systemd user 单元装到 ~/.config/systemd/user')
     s.set_defaults(fn=cmd_install_units)
     a = p.parse_args(argv)

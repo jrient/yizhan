@@ -244,3 +244,33 @@ def test_overview_alerts_and_states_are_labelled(cfg, db):
     o = data.overview('demo')
     assert o['alerts'][0]['label'] == '监听心跳中断'
     assert o['card_state_list'] == [{'state': 'open', 'label': '待处理', 'n': 1}]
+
+
+def test_stats_daily_buckets_fill_zero_days(cfg, db):
+    now = dbm.now_ms()
+    ev(db, 'om_1', now - 60_000)
+    cardsmod.assign_cards(db, cfg, now)
+    dbm.insert_reply(db, 1, 'om_1', 'om_me', 'reply', 'frame config', 'e' * 20, '回了')
+    dbm.insert_round(db, issue_id=1, session_id='s', started_at=now - 5000, ended_at=now, rc=0,
+                     context_tokens=1000, output_tokens=10, cost_usd=1.25, outcome='answered')
+    dbm.record_error(db, 'probe_failed', 'x', at=now - 86400_000)
+    dbm.record_error(db, 'evidence_rejected', 'y', at=now)
+    s = data.stats('demo', 7)
+    assert len(s['daily']) == 7 and s['daily'][-1]['msgs'] == 1       # 没数据的日子也在,补 0
+    assert s['kpis']['cost_usd'] == 1.25 and s['kpis']['errors'] == 2
+    assert s['kpis']['evidence_rejected'] == 1 and s['kpis']['answered_rate'] == 0.0
+    kinds = [e['kind'] for e in s['errors_by_kind']]
+    assert kinds == ['probe_failed', 'evidence_rejected']               # 固定顺序,不按数量排
+    assert {r['type'] for r in s['reply_types']} == {'frame', 'config'} # 多类型拆开计
+    assert s['senders'][0]['n'] == 1 and s['context'][0]['context_tokens'] == 1000
+
+
+def test_stats_percentiles():
+    assert data._pct([], 0.5) is None
+    assert data._pct([10, 20, 30, 40], 0.5) == 25.0
+    assert data._pct([100], 0.9) == 100.0
+
+
+def test_stats_clamps_range(cfg, db):
+    assert data.stats('demo', 999)['range']['days'] == 90
+    assert data.stats('demo', 0)['range']['days'] == 1

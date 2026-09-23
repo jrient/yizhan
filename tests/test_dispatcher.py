@@ -219,3 +219,22 @@ def test_probe_failure_touches_no_card(dcfg, monkeypatch):
     it = dbm.get_issue(conn, 1)
     assert it['state'] == 'open' and it['redispatch'] == 0      # 卡原封不动
     assert any('探活失败' in t for t in c.texts)
+
+
+def test_errors_recorded_every_time_not_deduped(dcfg, monkeypatch):
+    """告警一小时去重,错误流水不能去重,否则统计会少计(09-22 实际 80 次,告警只记了 6 条)。"""
+    monkeypatch.setattr(dispatcher.claude_runner, 'probe', lambda cfg: (False, '探活超时 30s'))
+    conn = dbm.connect(dcfg.paths.db_file); seed(conn, dcfg); conn.close()
+    for _ in range(3):
+        with pytest.raises(dispatcher.ProbeFailed):
+            dispatcher.run_once(dcfg, client=FakeClient(), max_cards=1)
+    conn = dbm.connect(dcfg.paths.db_file)
+    assert conn.execute("SELECT COUNT(*) FROM errors WHERE kind='probe_failed'").fetchone()[0] == 3
+    assert conn.execute("SELECT COUNT(*) FROM alerts WHERE kind='probe_failed'").fetchone()[0] == 1
+
+
+def test_stuck_recorded_as_error(dcfg):
+    conn = dbm.connect(dcfg.paths.db_file); seed(conn, dcfg); conn.close()
+    dispatcher.run_once(dcfg, client=FakeClient())
+    conn = dbm.connect(dcfg.paths.db_file)
+    assert conn.execute("SELECT COUNT(*) FROM errors WHERE kind='stuck'").fetchone()[0] == 1

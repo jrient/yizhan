@@ -143,3 +143,12 @@ def test_card_shows_replies_before_messages(ctx, capsys):
     fgctl.main(['card', str(iid)])
     out = capsys.readouterr().out
     assert out.index('我方已经回过这张卡 1 条') < out.index('卡内消息')
+
+
+def test_evidence_rejection_is_recorded(ctx):
+    """证据门拦下的次数进统计:这是查证纪律起作用最直接的证据。"""
+    add_card(ctx)
+    fgctl.main(['reply', 'om_0', '应该没问题', '--type', 'frame', '--evidence', '凭经验判断是模型随机的'])
+    rows = ctx.db.execute("SELECT kind, issue_id, detail FROM errors").fetchall()
+    assert len(rows) == 1 and rows[0]['kind'] == 'evidence_rejected'
+    assert rows[0]['issue_id'] == 1 and '托词' in rows[0]['detail']

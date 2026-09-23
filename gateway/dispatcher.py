@@ -105,7 +105,14 @@ def process_card(conn, cfg, client, it) -> str:
                          rc=res.rc, context_tokens=res.context_tokens, output_tokens=out_tokens,
                          cost_usd=cost, cost_cum_usd=cum or None, outcome=outcome)
 
+    if res.idle_killed:
+        dbm.record_error(conn, 'idle_killed', f'{cfg.idle_timeout_min} 分钟无输出', iid)
+    if res.hard_killed:
+        dbm.record_error(conn, 'hard_killed', f'超过 {cfg.hard_timeout_min} 分钟', iid)
+    if res.rc not in (0, None) and not (res.idle_killed or res.hard_killed):
+        dbm.record_error(conn, 'rc_nonzero', f'rc={res.rc} {res.stderr[-200:]}', iid)
     if res.resume_failed:
+        dbm.record_error(conn, 'resume_failed', res.stderr[-200:], iid)
         new_sid = dbm.session_rotate(conn, 'resume_failed')
         alert(conn, client, cfg, 'session_rotate', f'--resume {sid} 失败,已轮换到 {new_sid}')
         cards.finish_card(conn, cfg, iid)
@@ -124,6 +131,7 @@ def process_card(conn, cfg, client, it) -> str:
     state = cards.finish_card(conn, cfg, iid)
     _round(state)
     if state == 'stuck':
+        dbm.record_error(conn, 'stuck', f'重派 {cfg.max_redispatch} 次仍未答复', iid)
         alert(conn, client, cfg, f'stuck:{iid}',
               f'卡 #{iid} 重派 {cfg.max_redispatch} 次仍未答复,已标 stuck。'
               f'看 {cfg.paths.logs}/claude-stream.jsonl')
@@ -152,6 +160,7 @@ def run_once(cfg, *, client=None, max_cards: int = 20, max_wait_sec: float = 90)
             ok, msg = claude_runner.probe(cfg)
             probed = ok
             if not ok:
+                dbm.record_error(conn, 'probe_failed', msg)
                 alert(conn, client, cfg, 'probe_failed', f'claude 探活失败,不动任何卡: {msg}')
         return probed
     for iid, st in cards.recover_stale(conn, cfg):

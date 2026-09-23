@@ -192,3 +192,12 @@ def test_logs_stream_signals_stop_not_close(auth_client, cfg, monkeypatch):
 
 def test_logs_unknown_stream_400(auth_client):
     assert auth_client.get('/api/i/demo/logs/syslog').status_code == 400
+
+
+def test_stats_endpoint(auth_client, db):
+    r = auth_client.get('/api/i/demo/stats?days=30')
+    assert r.status_code == 200
+    d = r.json()
+    assert d['range']['days'] == 30 and len(d['daily']) == 30
+    assert {'kpis', 'errors_by_kind', 'reply_types', 'senders', 'context', 'coverage'} <= set(d)
+    assert auth_client.get('/api/i/ghost/stats').status_code == 404

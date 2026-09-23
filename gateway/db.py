@@ -117,6 +117,14 @@ CREATE TABLE IF NOT EXISTS heartbeat (
 CREATE TABLE IF NOT EXISTS alerts (
   kind TEXT, sent_at INTEGER, text TEXT
 );
+CREATE TABLE IF NOT EXISTS errors (
+  error_id INTEGER PRIMARY KEY AUTOINCREMENT,
+  kind     TEXT,           -- probe_failed/resume_failed/idle_killed/hard_killed/stuck/rc_nonzero/evidence_rejected/feishu_error
+  at       INTEGER,
+  issue_id INTEGER,
+  detail   TEXT
+);
+CREATE INDEX IF NOT EXISTS ix_errors_at ON errors(at);
 CREATE TABLE IF NOT EXISTS members (
   open_id TEXT PRIMARY KEY, name TEXT
 );
@@ -370,6 +378,16 @@ def my_message_ids(conn) -> set[str]:
 
 
 # ---- alerts / members / reactions ----
+def record_error(conn, kind: str, detail: str = '', issue_id: int | None = None, at: int | None = None):
+    """错误流水,每次都记,不去重。
+
+    告警表同类一小时只记一次,拿来统计会严重少计:09-22 journal 里 80 次探活失败,
+    告警表只有 6 条(2026-09-23 做统计图时发现)。
+    """
+    conn.execute('INSERT INTO errors(kind,at,issue_id,detail) VALUES(?,?,?,?)',
+                 (kind, at or now_ms(), issue_id, (detail or '')[:500]))
+
+
 def alert_recent(conn, kind: str, within_ms: int) -> bool:
     r = conn.execute('SELECT 1 FROM alerts WHERE kind=? AND sent_at>=? LIMIT 1', (kind, now_ms() - within_ms)).fetchone()
     return r is not None

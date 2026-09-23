@@ -296,6 +296,15 @@ def cmd_checklist(ctx, a):
     print(CHECKLIST)
 
 
+def _record(ctx, kind: str, detail: str, a):
+    try:
+        mid = getattr(a, 'message_id', None)
+        iid = _resolve_issue(ctx, mid) if mid else getattr(a, 'issue', None)
+        dbm.record_error(ctx.db, kind, f'{a.cmd}: {detail}', iid)
+    except Exception:
+        pass                              # 记账失败不能挡住原本的报错输出
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser('fgctl', description='驿站:读卡、回群、销账')
     p.add_argument('--inst', default=os.environ.get('YIZHAN_INST'))
@@ -351,9 +360,12 @@ def main(argv=None) -> int:
     try:
         a.fn(ctx, a)
     except EvidenceError as e:
+        # 证据门拦下一次就记一笔:这是「查证纪律在起作用」最直接的指标
+        _record(ctx, 'evidence_rejected', str(e).split('\n')[0], a)
         print(str(e), file=sys.stderr)
         return 1
     except FeishuError as e:
+        _record(ctx, 'feishu_error', str(e), a)
         print(f'飞书接口失败: {e}(没有标记已回复,下一轮会重来)', file=sys.stderr)
         return 1
     return 0
