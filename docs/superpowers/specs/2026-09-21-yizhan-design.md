@@ -13,7 +13,7 @@
 | 消息投递 | 长连接(wss);轮询只用于启动补拉 | 专用应用已无独占限制;话题回复与私聊只有事件里带全字段 |
 | 部署 | 仅宿主机,systemd user 模板单元,`enable-linger` | Claude 凭证、项目、mysql、ffmpeg 全在宿主;不容器化 |
 | 状态存储 | 每实例一个 SQLite(WAL) | 替代现有 6 个 json/jsonl 文件 |
-| 权限 | 先 `--dangerously-skip-permissions` 跑通,两天内切 `--permission-mode dontAsk --permission-prompts none` + 项目 settings 允许清单 | 无头模式未预批调用直接拒绝不挂住(文档);群消息是不可信输入 |
+| 权限 | 先 `--dangerously-skip-permissions` 跑通,两天内切 `--permission-mode dontAsk --permission-prompts none` + 项目 settings 允许清单。**drama-auto 已于 2026-09-23 切换** | [实测] 被拒立即返回不挂住;heredoc 与 for 循环一律被拒;清单拦不住 python/Bash 的刻意写入,只读数据库账号经负责人决定不做 |
 | 并发 | 项目内串行(同一 session 不能并行 resume);跨项目天然并行(各自实例) | — |
 | 私聊 | 只响应白名单(张三、用户本人),其他私聊只记录 | 待用户确认 |
 
