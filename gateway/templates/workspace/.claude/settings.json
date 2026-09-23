@@ -1,16 +1,31 @@
 {
+  "_说明": "机器人的权限清单。受限模式(--permission-mode dontAsk --permission-prompts none)下未列在 allow 里的操作直接被拒、不卡住。按 2026-09-21~23 转录里实际用到的命令整理。注意 python3 放行后等于能跑任意代码,「不许写库」要靠只读数据库账号兜底,光靠这份清单拦不住。",
   "permissions": {
     "allow": [
       "Bash(fgctl:*)",
-      "Bash(ls:*)", "Bash(cat:*)", "Bash(head:*)", "Bash(tail:*)", "Bash(sed:*)",
-      "Bash(grep:*)", "Bash(rg:*)", "Bash(find:*)", "Bash(wc:*)", "Bash(date)",
-      "Bash(python3:*)", "Bash(ffmpeg:*)", "Bash(ffprobe:*)",
+      "Bash(ls:*)", "Bash(cat:*)", "Bash(head:*)", "Bash(tail:*)", "Bash(sed -n:*)",
+      "Bash(grep:*)", "Bash(rg:*)", "Bash(wc:*)", "Bash(sort:*)", "Bash(uniq:*)", "Bash(cut:*)",
+      "Bash(stat:*)", "Bash(du:*)", "Bash(file:*)", "Bash(jq:*)", "Bash(echo:*)",
+      "Bash(date:*)", "Bash(TZ=Asia/Shanghai date:*)",
+      "Bash(cd:*)", "Bash(python3:*)", "Bash(./.venv/bin/python:*)", "Bash({project_dir}/.venv/bin/python:*)",
+      "Bash(ffmpeg:*)", "Bash(ffprobe:*)", "Bash(sqlite3 -readonly:*)",
+      "Bash(git status:*)", "Bash(git log:*)", "Bash(git diff:*)", "Bash(git show:*)",
+      "Bash(systemctl --user status:*)", "Bash(systemctl --user is-active:*)", "Bash(journalctl --user:*)",
+      "Bash(ps:*)",
       "Read", "Glob", "Grep", "Write", "Edit"
     ],
     "deny": [
-      "Bash(rm:*)", "Bash(sudo:*)", "Bash(curl:*)", "Bash(wget:*)",
-      "Bash(git push:*)", "Bash(docker:*)",
-      "Read(**/.env)", "Read(**/.credentials.json)"
+      "Bash(rm:*)", "Bash(mv:*)", "Bash(sudo:*)", "Bash(chmod:*)", "Bash(chown:*)",
+      "Bash(sed -i:*)", "Bash(tee:*)", "Bash(kill:*)", "Bash(pkill:*)",
+      "Bash(curl:*)", "Bash(wget:*)", "Bash(mysql:*)",
+      "Bash(git push:*)", "Bash(git commit:*)", "Bash(git add:*)", "Bash(git reset:*)",
+      "Bash(git checkout:*)", "Bash(git restore:*)",
+      "Bash(systemctl --user start:*)", "Bash(systemctl --user stop:*)", "Bash(systemctl --user restart:*)",
+      "Bash(systemctl --user enable:*)", "Bash(systemctl --user disable:*)",
+      "Bash(docker:*)",
+      "Write(//data/projects/**)", "Edit(//data/projects/**)",
+      "Write(//data/QTS/**)", "Edit(//data/QTS/**)",
+      "Read(**/.credentials.json)"
     ]
   }
 }

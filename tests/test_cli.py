@@ -191,3 +191,13 @@ def test_init_force_never_overwrites_config(cfg, capsys):
     cli.main(['init', 'demo', '--project', cfg.project_dir, '--force'])
     assert cfg.paths.config_file.read_text() == before
     assert '不会覆盖' in capsys.readouterr().out
+
+
+def test_init_renders_project_path_into_settings(inst_env, tmp_path):
+    """允许清单里原项目虚拟环境的绝对路径要按实例渲染,不能留着 {project_dir} 占位符。"""
+    proj = tmp_path / 'pp'; proj.mkdir()
+    cli.main(['init', 'setx', '--project', str(proj)])
+    s = json.loads((Paths('setx').workspace / '.claude' / 'settings.json').read_text())
+    assert f'Bash({proj}/.venv/bin/python:*)' in s['permissions']['allow']
+    assert not any('{project_dir}' in r for r in s['permissions']['allow'])
+    assert 'Bash(sed -i:*)' in s['permissions']['deny'] and 'Bash(sed:*)' not in s['permissions']['allow']
