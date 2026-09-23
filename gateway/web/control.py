@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import os
+import tomllib
 import shutil
 import subprocess
 import threading
@@ -96,6 +97,7 @@ FIELDS: list[tuple] = [
     ('rotate_at_tokens', 'int', '上下文超过多少 token 就主动换新会话。0 = 关,靠自动压缩', False, ''),
     ('reply_in_thread', 'bool', '回复开不开话题。开=追问自动并进同一张卡;关=靠时间窗归并', False, ''),
     ('claude_bin', 'str', 'claude 可执行文件路径', False, ''),
+    ('probe_timeout_sec', 'int', '探活最多等几秒。代理慢时调大,否则会频繁报「claude 连不上」', False, ''),
     ('permission_args', 'list', 'claude 的权限参数。skip 会连 settings.json 的 deny 清单一起绕过', False, ''),
     ('claude_env', 'table', '给 claude 补的环境变量。这台机器要 https_proxy,不给就 403', False, ''),
 ]
@@ -169,12 +171,17 @@ def _toml_value(v) -> str:
     if isinstance(v, int):
         return str(v)
     if isinstance(v, list):
-        return '[' + ', '.join(f'"{x}"' for x in v) + ']'
+        return '[' + ', '.join(_toml_value(str(x)) for x in v) + ']'   # 元素也要转义引号和反斜杠
     return '"' + str(v).replace('\\', '\\\\').replace('"', '\\"') + '"'
 
 
-def dump_toml(values: dict) -> str:
-    """按 FIELDS 顺序写出 toml。表(claude_env)放最后,不然后面的普通键会被算进表里。"""
+def dump_toml(values: dict, extra: dict | None = None) -> str:
+    """按 FIELDS 顺序写出 toml,再追加 extra 里表单管不到的键。
+
+    表(claude_env 这类 dict)一律放最后,不然后面的普通键会被算进表里。
+    extra 的存在是因为:原来整份覆盖,手工加的、FIELDS 没列的键(比如 probe_timeout_sec)
+    在网页上随便存一次就被悄悄删掉(2026-09-23 审查发现)。
+    """
     lines, tables = [], []
     for name, kind, desc, _secret, _r in FIELDS:
         if name not in values:
@@ -185,6 +192,11 @@ def dump_toml(values: dict) -> str:
                           ''.join(f'{k} = {_toml_value(str(x))}\n' for k, x in (v or {}).items()))
             continue
         lines.append(f'# {desc}\n{name} = {_toml_value(v)}')
+    for k, v in (extra or {}).items():
+        if isinstance(v, dict):
+            tables.append(f'\n[{k}]\n' + ''.join(f'{kk} = {_toml_value(vv)}\n' for kk, vv in v.items()))
+        else:
+            lines.append(f'{k} = {_toml_value(v)}')
     return '\n'.join(lines) + '\n' + ''.join(tables)
 
 
@@ -214,13 +226,17 @@ def config_write(inst: str, form: dict) -> dict:
     if errors:
         return {'ok': False, 'errors': errors, 'needs_restart': []}
 
-    text = dump_toml(values)
+    with open(paths.config_file, 'rb') as f:
+        raw = tomllib.load(f)
+    known = {n for n, *_ in FIELDS}
+    extra = {k: v for k, v in raw.items() if k not in known}
+    text = dump_toml(values, extra)
     with _write_lock:
         tmp = paths.config_file.with_suffix('.toml.tmp')
         tmp.write_text(text, encoding='utf-8')
         tmp.chmod(0o600)
         try:
-            _validate_tmp(inst, tmp)
+            configmod.load_file(inst, tmp)      # 直接验临时文件,正式文件全程不动
         except configmod.ConfigError as e:
             tmp.unlink(missing_ok=True)
             return {'ok': False, 'errors': {'_': str(e)}, 'needs_restart': []}
@@ -230,19 +246,6 @@ def config_write(inst: str, form: dict) -> dict:
                if n in form and values[n] != getattr(current, n)]
     restart = sorted({r for n, _k, _d, _s, r in FIELDS if n in changed and r})
     return {'ok': True, 'errors': {}, 'needs_restart': restart, 'changed': changed}
-
-
-def _validate_tmp(inst: str, tmp: Path):
-    """用真正的 config.load 验一遍临时文件:它怎么读,我们就怎么验。"""
-    real = Paths(inst).config_file
-    backup = real.with_suffix('.toml.bak')
-    shutil.copy2(real, backup)
-    try:
-        shutil.copy2(tmp, real)
-        configmod.load(inst)
-    finally:
-        shutil.copy2(backup, real)
-        backup.unlink(missing_ok=True)
 
 
 # ---- 新建向导 ----

@@ -843,10 +843,8 @@ async function renderConfig() {
               if (f.type === 'bool') {
                 inputHtml = `<label class="ui-switch"><input type="checkbox" name="${esc(f.name)}" ${val ? 'checked' : ''}><span class="track"></span></label>`;
               } else if (f.type === 'list') {
-                val = Array.isArray(val) ? val.join('\\n') : '';
+                val = Array.isArray(val) ? val.join('\n') : '';   // 真换行。'\\n' 是反斜杠加 n,保存会把多项合成一项
                 inputHtml = `<textarea name="${esc(f.name)}" class="ui-textarea" rows="3" placeholder="每行一个">${esc(val)}</textarea>`;
-              } else if (f.type === 'int' && (val === 0 || val === '0')) {
-                val = '0';                 // 0 是有意义的值(关闭阈值),别渲染成空
               } else if (f.type === 'table') {
                 val = typeof val === 'object' ? JSON.stringify(val, null, 2) : '';
                 inputHtml = `<textarea name="${esc(f.name)}" class="ui-textarea" rows="4" placeholder="JSON格式字典">${esc(val)}</textarea>`;
@@ -858,7 +856,7 @@ async function renderConfig() {
                     </div>
                   `;
                 } else {
-                  inputHtml = `<input name="${esc(f.name)}" type="text" class="ui-input" value="${esc(val || '')}" style="width:100%">`;
+                  inputHtml = `<input name="${esc(f.name)}" type="text" class="ui-input" value="${esc(val ?? '')}" style="width:100%">`;   // ?? 而不是 ||:0 是有效值(如轮换阈值 0=关)
                 }
               }
               

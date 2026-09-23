@@ -213,3 +213,51 @@ def test_table_field_accepts_json_form(cfg):
     assert configmod.load('demo').claude_env == {'https_proxy': 'http://127.0.0.1:7890'}   # 没被改坏
     r = control.config_write('demo', {'claude_env': '{}'})
     assert r['ok'] and configmod.load('demo').claude_env == {}
+
+
+def test_save_keeps_keys_the_form_does_not_know(cfg):
+    """原来整份覆盖,手工加的键在网页上存一次就没了。"""
+    with open(cfg.paths.config_file, 'a') as f:
+        f.write('\nprobe_timeout_sec = 90\nfuture_knob = "keep-me"\n')
+    r = control.config_write('demo', {'quiet_seconds': '20'})
+    assert r['ok'], r
+    import tomllib
+    raw = tomllib.loads(cfg.paths.config_file.read_text())
+    assert raw['probe_timeout_sec'] == 90 and raw['future_knob'] == 'keep-me'
+    assert configmod.load('demo').probe_timeout_sec == 90
+
+
+def test_list_values_with_quotes_and_backslashes_roundtrip(cfg):
+    r = control.config_write('demo', {'permission_args': '--allowedTools "Bash(ls:*)"\nC:\\path'})
+    assert r['ok'], r
+    assert configmod.load('demo').permission_args == ['--allowedTools "Bash(ls:*)"', 'C:\\path']
+
+
+def test_invalid_save_never_touches_real_file(cfg, monkeypatch):
+    """校验失败时正式文件一个字节都不能变,也不能留临时文件。"""
+    before = cfg.paths.config_file.read_bytes()
+    real = configmod.load_file
+    seen = []
+    def fake(inst, path):
+        seen.append(str(path))
+        if str(path).endswith('.tmp'):
+            # 校验临时文件的那一刻,正式文件必须还是原样(原来会先把临时文件拷上去)
+            assert cfg.paths.config_file.read_bytes() == before
+            raise configmod.ConfigError('假装校验失败')
+        return real(inst, path)
+    monkeypatch.setattr(control.configmod, 'load_file', fake)
+    r = control.config_write('demo', {'quiet_seconds': '20'})
+    assert not r['ok'] and '假装' in r['errors']['_']
+    assert any(x.endswith('.tmp') for x in seen)          # 确实校验的是临时文件
+    assert cfg.paths.config_file.read_bytes() == before
+    assert not list(cfg.paths.config_dir.glob('*.tmp'))
+
+
+def test_multiline_list_from_form_is_split(cfg):
+    """配置页 textarea 提交的是真换行分隔的多项,必须拆成多项而不是一项。"""
+    r = control.config_write('demo', {'group_allow': 'oc_a\noc_b'})
+    assert r['ok'] and configmod.load('demo').group_allow == ['oc_a', 'oc_b']
+
+
+def test_probe_timeout_is_editable():
+    assert any(f['name'] == 'probe_timeout_sec' for f in control.field_meta())

@@ -93,7 +93,8 @@
         let ok = json[k].ok;
         if (!ok) allOk = false;
         let icon = ok ? '✅' : '❌';
-        let msgHtml = json[k].message ? json[k].message.replace(/\\n/g, '<br>') : '';
+        // message 里有飞书接口返回的原文,当不可信内容处理;换行交给 white-space: pre-wrap
+        let msgHtml = esc(json[k].message || '');
         resultsDiv.innerHTML += `
           <div class="ui-alert ${ok ? 'ok' : 'danger'}">
             <span class="ico">${icon}</span>
@@ -106,6 +107,18 @@
       }
     });
     
+    // 配置没存进去时(比如 app_id 为空、目录不存在)后端只回 saved.errors,原来页面上什么都不显示
+    if (json.saved && !json.saved.ok) {
+      const errs = Object.entries(json.saved.errors || {}).map(([f, m]) => `${esc(f)}:${esc(m)}`).join('\n');
+      resultsDiv.innerHTML = `
+        <div class="ui-alert danger">
+          <span class="ico">❌</span>
+          <div><div class="title">配置没有保存</div>
+          <div class="desc wrap" style="white-space: pre-wrap;">${errs || '校验未通过'}</div></div>
+        </div>`;
+      return;
+    }
+
     if (res.ok && allOk) {
       document.getElementById('step2-card').style.opacity = '0.5';
       document.getElementById('step2-card').style.pointerEvents = 'none';

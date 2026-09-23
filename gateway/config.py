@@ -49,11 +49,24 @@ def load(inst: str) -> Config:
     paths = Paths(inst)
     if not paths.config_file.exists():
         raise ConfigError(f'配置不存在: {paths.config_file}(先跑 yizhan init {inst} --project <dir>)')
-    with open(paths.config_file, 'rb') as f:
-        data = tomllib.load(f)
+    return load_file(inst, paths.config_file)
+
+
+def load_file(inst: str, path) -> Config:
+    """按实例 inst 的规则解析任意一个 toml 文件。
+
+    控制台保存配置时用它校验临时文件:原来是先把临时文件拷到正式路径上再 load,
+    校验的那一瞬间 dispatcher 可能正好读到一份没验证过的配置(2026-09-23 审查发现)。
+    """
+    paths = Paths(inst)
+    try:
+        with open(path, 'rb') as f:
+            data = tomllib.load(f)
+    except tomllib.TOMLDecodeError as e:
+        raise ConfigError(f'{path} 不是合法的 TOML: {e}') from e
     missing = [k for k in Config.REQUIRED if not data.get(k)]
     if missing:
-        raise ConfigError(f'{paths.config_file} 缺必填字段: {missing}')
+        raise ConfigError(f'{path} 缺必填字段: {missing}')
     known = {k: v for k, v in data.items() if k in Config.__dataclass_fields__ and k not in ('inst', 'paths')}
     cfg = Config(inst=inst, paths=paths, **known)
     cfg.claude_bin = os.path.expanduser(cfg.claude_bin)

@@ -68,3 +68,15 @@ def test_untrusted_fields_are_escaped():
     text = (STATIC / 'app.js').read_text()
     raw = re.findall(r'\$\{\s*[\w.]+\.(' + '|'.join(UNTRUSTED) + r')\s*\}', text)
     assert not raw, f'这些字段没过 esc() 就插进了 HTML: {sorted(set(raw))}'
+
+
+def test_list_fields_join_with_real_newline():
+    """'\\\\n' 在 JS 源码里是反斜杠加 n。配置页用它拼名单,保存一次就把两个群合成一个不存在的 ID。"""
+    text = (STATIC / 'app.js').read_text()
+    assert "join('\\\\n')" not in text and 'join("\\\\n")' not in text
+
+
+def test_zero_is_rendered_not_dropped():
+    """整数 0 是有效值(轮换阈值 0=关)。用 `val || ''` 会把 0 渲染成空。"""
+    text = (STATIC / 'app.js').read_text()
+    assert "value=\"${esc(val || '')}\" style=\"width:100%\"" not in text
