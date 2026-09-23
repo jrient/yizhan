@@ -202,3 +202,45 @@ def test_overview_reports_dispatcher_active(cfg, db, monkeypatch):
                         lambda args, timeout=10: (0, 'activating') if args[0] == 'is-active' else (0, ''))
     o = data.overview('demo')
     assert o['dispatcher_active'] is True and o['timer_next'] is None
+
+
+def test_labels_and_preview(cfg, db):
+    assert data.state_label('answered') == '已答复' and data.state_label('stuck') == '卡死'
+    assert data.alert_label('probe_failed') == 'claude 连不上'
+    assert data.alert_label('stuck:7') == '卡 #7 卡死'
+    assert data._preview('@机器人 @小白 第18秒\n背景不对') == '第18秒 背景不对'
+    assert data._preview('字' * 80).endswith('…')
+
+
+def test_cards_have_preview_source_and_reply_count(cfg, db):
+    now = dbm.now_ms()
+    ev(db, 'om_1', now - 60_000, text='@bot 圣狮第十六集第18秒背景是木墙')
+    cardsmod.assign_cards(db, cfg, now)
+    dbm.insert_reply(db, 1, 'om_1', 'om_me', 'reply', 'frame', '抽帧 a.jpg 第18秒', '查过了')
+    dbm.insert_reply(db, 1, 'om_1', 'om_me2', 'reply', 'frame', '抽帧 b.jpg 第20秒', '补充')
+    it = data.cards('demo')['items'][0]
+    assert it['preview'] == '圣狮第十六集第18秒背景是木墙'
+    assert it['source'] == '群' and it['n_replies'] == 2 and it['state_label'] == '待处理'
+    assert it['last_reply_at'] is not None
+
+
+def test_wall_hides_stale_alerts_and_shows_activity(cfg, db):
+    now = dbm.now_ms()
+    db.execute("INSERT INTO alerts(kind,sent_at,text) VALUES('probe_failed',?, '旧的')", (now - 2 * 86400_000,))
+    ev(db, 'om_1', now - 60_000)
+    s = data.instance_summary('demo')
+    assert s['last_alert'] is None                    # 两天前的告警不再挂在卡片墙上
+    assert s['last_msg_at'] == now - 60_000
+    db.execute("INSERT INTO alerts(kind,sent_at,text) VALUES('stuck:3',?, '卡死了')", (now - 60_000,))
+    s = data.instance_summary('demo')
+    assert s['last_alert']['label'] == '卡 #3 卡死' and s['last_alert']['text'] == '卡死了'
+
+
+def test_overview_alerts_and_states_are_labelled(cfg, db):
+    now = dbm.now_ms()
+    db.execute("INSERT INTO alerts(kind,sent_at,text) VALUES('listener_stale',?, 'x')", (now,))
+    ev(db, 'om_1', now - 60_000)
+    cardsmod.assign_cards(db, cfg, now)
+    o = data.overview('demo')
+    assert o['alerts'][0]['label'] == '监听心跳中断'
+    assert o['card_state_list'] == [{'state': 'open', 'label': '待处理', 'n': 1}]

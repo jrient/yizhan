@@ -13,7 +13,7 @@ def alert(conn, client, cfg, kind: str, text: str) -> bool:
     if dbm.alert_recent(conn, kind, DEDUP_MS):
         log.info('alert[%s] 1h 内已发过,跳过: %s', kind, text)
         return False
-    dbm.alert_record(conn, kind)
+    dbm.alert_record(conn, kind, text)
     log.warning('alert[%s] %s', kind, text)
     if not cfg.alert_open_id or client is None:
         return False

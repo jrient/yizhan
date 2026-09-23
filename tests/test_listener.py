@@ -90,3 +90,36 @@ def test_heartbeat_ticks_without_messages(cfg, db, monkeypatch):
         __import__('time').sleep(0.02)
     stop.set(); t.join(timeout=2)
     assert dbm.heartbeat_get(db) > 1000
+
+
+class MemberClient:
+    def __init__(self, names): self.names, self.calls = names, 0
+    def chat_members(self, chat_id):
+        self.calls += 1
+        return self.names
+    def send_text(self, *a): return 'om'
+
+
+def test_unknown_sender_triggers_member_sync(db, cfg):
+    """飞书事件只带 open_id,没被 @ 过的人原来一直显示成 ou_xxx。"""
+    listener._member_sync_at.clear()
+    c = MemberClient({'ou_a': '张三（张三）', 'ou_b': '小白'})
+    listener.handle_message(db, cfg, ev('om_1'), 'ou_bot', None, client=c)
+    assert dbm.member_name(db, 'ou_a') == '张三（张三）' and c.calls == 1
+    listener.handle_message(db, cfg, ev('om_2', sender_id='ou_new'), 'ou_bot', None, client=c)
+    assert c.calls == 1                       # 10 分钟冷却,不会每条消息都拉
+
+
+def test_known_sender_does_not_sync(db, cfg):
+    listener._member_sync_at.clear()
+    dbm.insert_event(db, ev('om_0', mentions=[{'key': 'k', 'id': 'ou_a', 'name': '已知'}]))
+    c = MemberClient({})
+    listener.handle_message(db, cfg, ev('om_1'), 'ou_bot', None, client=c)
+    assert c.calls == 0
+
+
+def test_bot_added_syncs_members(db, cfg):
+    listener._member_sync_at.clear()
+    c = MemberClient({'ou_x': '新同事'})
+    listener.handle_bot_added(db, cfg, c, 'oc_group1')
+    assert dbm.member_name(db, 'ou_x') == '新同事'

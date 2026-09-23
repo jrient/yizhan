@@ -47,6 +47,33 @@ def start_heartbeat(db_file, stop: threading.Event | None = None, period: float 
     return stop, t
 
 
+_member_sync_at: dict[str, float] = {}
+MEMBER_SYNC_COOLDOWN = 600
+
+
+def sync_members(conn, client, chat_id: str, force: bool = False) -> int:
+    """把群成员的名字拉进 members 表。
+
+    飞书消息事件只带发送人 open_id,不带名字;原来名字只能从「有人 @ 过他」里学到,
+    没被 @ 过的人在控制台和 fgctl 里一直显示成 ou_xxx(2026-09-23)。
+    同一个群 10 分钟内最多拉一次。
+    """
+    now = time.time()
+    if not force and now - _member_sync_at.get(chat_id, 0) < MEMBER_SYNC_COOLDOWN:
+        return 0
+    _member_sync_at[chat_id] = now
+    try:
+        names = client.chat_members(chat_id)
+    except Exception as e:
+        log.warning('同步群成员失败 %s: %s', chat_id, e)
+        return 0
+    for oid, name in names.items():
+        if oid and name:
+            conn.execute('INSERT OR REPLACE INTO members(open_id,name) VALUES(?,?)', (oid, name))
+    log.info('群 %s 同步成员 %d 人', chat_id, len(names))
+    return len(names)
+
+
 def trigger_dispatcher(inst: str):
     # --no-block 是必须的:dispatcher 是 oneshot,不加会一直等到它处理完整轮卡
     # (实测 2026-09-21:收到第一条消息就卡了 10 秒超时,期间收不了新事件)。
@@ -57,7 +84,7 @@ def trigger_dispatcher(inst: str):
         log.warning('拉起 dispatcher 失败: %s', e)
 
 
-def handle_message(conn, cfg, ev: EventRow, bot_open_id: str, trigger=None) -> bool:
+def handle_message(conn, cfg, ev: EventRow, bot_open_id: str, trigger=None, client=None) -> bool:
     """返回是否写入了新事件。"""
     if ev.sender_type == 'app' or ev.sender_id == bot_open_id:
         return False                                   # 自身/其他机器人的消息一律丢弃
@@ -69,6 +96,8 @@ def handle_message(conn, cfg, ev: EventRow, bot_open_id: str, trigger=None) -> b
     if ev.thread_id:
         dbm.touch_thread(conn, ev.thread_id, ev.chat_id, ev.root_id, ev.create_time)
     dbm.set_cursor(conn, ev.chat_id, ev.create_time)
+    if client is not None and ev.chat_type != 'p2p' and ev.sender_id and not dbm.member_name(conn, ev.sender_id):
+        sync_members(conn, client, ev.chat_id)          # 见到不认识的人就补一次名单
     participated = dbm.participated_threads(conn)
     wake = ev.mentions_me or (ev.thread_id in participated if ev.thread_id else False) or ev.chat_type == 'p2p'
     log.info('event %s chat=%s thread=%s @me=%s wake=%s', ev.message_id, ev.chat_id, ev.thread_id, ev.mentions_me, wake)
@@ -79,6 +108,7 @@ def handle_message(conn, cfg, ev: EventRow, bot_open_id: str, trigger=None) -> b
 
 def handle_bot_added(conn, cfg, client, chat_id: str, chat_type='group'):
     is_new = dbm.upsert_chat(conn, chat_id, chat_type, allowed=chat_id in cfg.group_allow)
+    sync_members(conn, client, chat_id, force=True)
     if chat_id not in cfg.group_allow:
         alert(conn, client, cfg, f'new_chat:{chat_id}',
               f'已进入新群 {chat_id},当前不在 group_allow,不会响应。要启用请加进 '
@@ -132,13 +162,15 @@ def main(argv=None) -> int:
     log.info('bot open_id=%s;群白名单=%s', bot, cfg.group_allow)
     dbm.heartbeat_touch(conn)
     start_heartbeat(cfg.paths.db_file)
+    for chat_id in cfg.group_allow:
+        sync_members(conn, client, chat_id, force=True)
     backfill(conn, cfg, client, bot)
 
     import lark_oapi as lark
 
     def on_message(data):
         try:
-            handle_message(conn, cfg, from_ws_event(data, bot), bot, trigger=trigger_dispatcher)
+            handle_message(conn, cfg, from_ws_event(data, bot), bot, trigger=trigger_dispatcher, client=client)
         except Exception as e:
             log.exception('处理消息失败: %s', e)
 

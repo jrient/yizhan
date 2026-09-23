@@ -115,7 +115,7 @@ CREATE TABLE IF NOT EXISTS heartbeat (
   id INTEGER PRIMARY KEY CHECK (id = 1), at INTEGER
 );
 CREATE TABLE IF NOT EXISTS alerts (
-  kind TEXT, sent_at INTEGER
+  kind TEXT, sent_at INTEGER, text TEXT
 );
 CREATE TABLE IF NOT EXISTS members (
   open_id TEXT PRIMARY KEY, name TEXT
@@ -136,6 +136,9 @@ def _migrate(conn):
     for col, ddl in (('defer_count', 'INTEGER DEFAULT 0'), ('woke_from_defer', 'INTEGER DEFAULT 0')):
         if col not in have:
             conn.execute(f'ALTER TABLE issues ADD COLUMN {col} {ddl}')
+    acols = {r[1] for r in conn.execute('PRAGMA table_info(alerts)')}
+    if acols and 'text' not in acols:
+        conn.execute('ALTER TABLE alerts ADD COLUMN text TEXT')
     rcols = {r[1] for r in conn.execute('PRAGMA table_info(rounds)')}
     if rcols and 'cost_cum_usd' not in rcols:
         conn.execute('ALTER TABLE rounds ADD COLUMN cost_cum_usd REAL')
@@ -372,8 +375,8 @@ def alert_recent(conn, kind: str, within_ms: int) -> bool:
     return r is not None
 
 
-def alert_record(conn, kind: str):
-    conn.execute('INSERT INTO alerts(kind,sent_at) VALUES(?,?)', (kind, now_ms()))
+def alert_record(conn, kind: str, text: str | None = None):
+    conn.execute('INSERT INTO alerts(kind,sent_at,text) VALUES(?,?,?)', (kind, now_ms(), text))
 
 
 def members(conn) -> dict[str, str]:

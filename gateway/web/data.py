@@ -101,6 +101,44 @@ def timer_next(inst: str) -> str | None:
     return None
 
 
+# ---- 给人看的文案 ----
+# 页面上不露内部代号:状态、告警都在后端翻成中文,前端只管显示,两边不会各翻各的。
+STATE_LABELS = {
+    'open': '待处理', 'answering': '处理中', 'waiting': '挂起等待',
+    'answered': '已答复', 'closed': '已关闭', 'stuck': '卡死',
+}
+
+_ALERT_LABELS = {
+    'probe_failed': 'claude 连不上',
+    'listener_stale': '监听心跳中断',
+    'session_rotate': '会话已轮换',
+    'new_chat': '机器人进了新群',
+    'stuck': '卡死',
+    'stale_open': '长时间未处理',
+    'defer_exhausted': '挂起次数用完',
+}
+RECENT_ALERT_MS = 24 * 3600_000       # 卡片墙只挂 24 小时内的告警,旧的不再红着误导人
+
+
+def state_label(state: str | None) -> str:
+    return STATE_LABELS.get(state or '', state or '?')
+
+
+def alert_label(kind: str) -> str:
+    """'stuck:12' → '卡 #12 卡死';'new_chat:oc_x' → '机器人进了新群'。"""
+    base, _, arg = (kind or '').partition(':')
+    label = _ALERT_LABELS.get(base, base or '未知告警')
+    if arg and base in ('stuck', 'stale_open', 'defer_exhausted'):
+        return f'卡 #{arg} {label}'
+    return label
+
+
+def _alert_row(r) -> dict:
+    keys = r.keys()
+    return {'kind': r['kind'], 'label': alert_label(r['kind']), 'at': r['sent_at'],
+            'text': r['text'] if 'text' in keys else None}
+
+
 # ---- 健康 ----
 def health(f: dict) -> tuple[str, str]:
     """输入一组事实,输出 (颜色, 原因)。纯函数,好测。"""
@@ -164,7 +202,8 @@ def instance_summary(inst: str) -> dict:
     now = dbm.now_ms()
     if conn is None:
         row.update(heartbeat_ago_s=None, today_msgs=0, today_cards=0, today_replies=0,
-                   today_cost_usd=0.0, pending=0, context_tokens=0, last_alert=None)
+                   today_cost_usd=0.0, pending=0, context_tokens=0, last_alert=None,
+                   last_msg_at=None, last_reply_at=None)
         row['health'], row['health_reason'] = health({**row, 'listener_active': listener,
                                                       'dispatcher_rc': last['rc']})
         return row
@@ -178,8 +217,11 @@ def instance_summary(inst: str) -> dict:
     row['pending'] = q("SELECT COUNT(*) FROM issues WHERE state IN ('open','answering','waiting')")
     last_round = conn.execute('SELECT context_tokens FROM rounds ORDER BY started_at DESC LIMIT 1').fetchone()
     row['context_tokens'] = int(last_round[0] or 0) if last_round else 0
-    a = conn.execute('SELECT kind,sent_at FROM alerts ORDER BY sent_at DESC LIMIT 1').fetchone()
-    row['last_alert'] = {'kind': a['kind'], 'at': a['sent_at']} if a else None
+    a = conn.execute('SELECT * FROM alerts WHERE sent_at>=? ORDER BY sent_at DESC LIMIT 1',
+                     (now - RECENT_ALERT_MS,)).fetchone()
+    row['last_alert'] = _alert_row(a) if a else None
+    row['last_msg_at'] = q("SELECT MAX(create_time) FROM events WHERE sender_type!='app'")
+    row['last_reply_at'] = q('SELECT MAX(sent_at) FROM replies')
     facts = _facts(conn, cfg, now)
     row.update(facts)
     row['health'], row['health_reason'] = health({**row, **facts, 'listener_active': listener,
@@ -222,13 +264,15 @@ def overview(inst: str) -> dict:
                                  (a, b)).fetchone()[0],
             'cards': conn.execute('SELECT COUNT(*) FROM issues WHERE created_at>=? AND created_at<?',
                                   (a, b)).fetchone()[0]})
-    alerts = [dict(r) for r in conn.execute('SELECT kind,sent_at FROM alerts ORDER BY sent_at DESC LIMIT 10')]
+    alerts = [_alert_row(r) for r in conn.execute('SELECT * FROM alerts ORDER BY sent_at DESC LIMIT 10')]
     states = dict(conn.execute('SELECT state,COUNT(*) FROM issues GROUP BY state').fetchall())
+    state_list = [{'state': k, 'label': state_label(k), 'n': v} for k, v in states.items()]
     summary = instance_summary(inst)
     conn.close()
     # dispatcher 正在跑时 timer 没有下次时间(OnUnitInactiveSec 要等它先停),不是故障
     dispatcher_active = unit_state(f'yizhan-dispatcher@{inst}.service') in ('active', 'activating')
     return {'inst': inst, 'hourly': hourly, 'alerts': alerts, 'card_states': states,
+            'card_state_list': state_list,
             'summary': summary, 'timer_next': timer_next(inst),
             'dispatcher_active': dispatcher_active,
             'quiet_seconds': cfg.quiet_seconds, 'skill': cfg.skill}
@@ -251,14 +295,29 @@ def cards(inst: str, state: str | None = None, page: int = 1, size: int = 20) ->
     items = []
     for r in rows:
         n = conn.execute('SELECT COUNT(*) FROM issue_messages WHERE issue_id=?', (r['issue_id'],)).fetchone()[0]
-        first = conn.execute('SELECT MIN(sent_at) FROM replies WHERE issue_id=?', (r['issue_id'],)).fetchone()[0]
-        items.append({'id': r['issue_id'], 'state': r['state'], 'sender': r['sender_id'],
+        first, last_rep, n_rep = conn.execute('SELECT MIN(sent_at), MAX(sent_at), COUNT(*) FROM replies '
+                                              'WHERE issue_id=?', (r['issue_id'],)).fetchone()
+        m0 = conn.execute('SELECT e.text, e.chat_type FROM issue_messages im JOIN events e '
+                          'ON e.message_id=im.message_id WHERE im.issue_id=? ORDER BY e.create_time LIMIT 1',
+                          (r['issue_id'],)).fetchone()
+        items.append({'id': r['issue_id'], 'state': r['state'], 'state_label': state_label(r['state']),
+                      'preview': _preview(m0['text'] if m0 else ''),
+                      'source': '私聊' if (m0 and m0['chat_type'] == 'p2p') else '群',
+                      'n_replies': n_rep, 'last_reply_at': last_rep,
+                      'sender': r['sender_id'],
                       'sender_name': _sender_name(conn, r['sender_id']), 'n_msgs': n,
                       'created_at': r['created_at'], 'chat_id': r['chat_id'],
                       'thread_id': r['thread_id'], 'redispatch': r['redispatch'], 'note': r['note'],
                       'first_reply_s': round((first - r['created_at']) / 1000) if first else None})
     conn.close()
     return {'total': total, 'page': page, 'size': size, 'items': items}
+
+
+def _preview(text: str, n: int = 60) -> str:
+    """卡列表里的一行摘要:去掉 @机器人 前缀和换行。"""
+    import re
+    t = re.sub(r'^\s*(@\S+\s*)+', '', text or '').replace('\n', ' ').strip()
+    return t if len(t) <= n else t[:n] + '…'
 
 
 def card(inst: str, issue_id: int) -> dict:
@@ -276,7 +335,9 @@ def card(inst: str, issue_id: int) -> dict:
     reps = [dict(r) for r in conn.execute('SELECT * FROM replies WHERE issue_id=? ORDER BY sent_at', (issue_id,))]
     rnds = [dict(r) for r in conn.execute('SELECT * FROM rounds WHERE issue_id=? ORDER BY started_at', (issue_id,))]
     conn.close()
-    return {'card': dict(it), 'messages': msgs, 'replies': reps, 'rounds': rnds}
+    c = dict(it)
+    c['state_label'] = state_label(c.get('state'))
+    return {'card': c, 'messages': msgs, 'replies': reps, 'rounds': rnds}
 
 
 def session(inst: str) -> dict:
