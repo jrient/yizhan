@@ -129,7 +129,7 @@ function renderInstances(instances) {
     let btnText = inst.paused ? '恢复' : '暂停';
     let btnAction = inst.paused ? 'resume' : 'pause';
     let pendingHighlight = inst.pending > 0 ? 'color: var(--warn); font-weight: bold;' : '';
-    let costStr = inst.today_cost_usd > 0 ? `$${inst.today_cost_usd.toFixed(4)}` : '$0';
+    let costStr = inst.today_cost_usd > 0 ? `$${inst.today_cost_usd.toFixed(2)}` : '$0';
     let ctxStr = inst.context_tokens > 0 ? `${(inst.context_tokens/1000).toFixed(1)}k` : '0';
     
     return `
@@ -144,7 +144,7 @@ function renderInstances(instances) {
         
         <div class="ui-desc" style="margin-bottom: 16px;">
           <dt>今日消息/卡/回复</dt><dd>${inst.today_msgs} / ${inst.today_cards} / ${inst.today_replies}</dd>
-          <dt>今日成本</dt><dd>${costStr}</dd>
+          <dt>今日用量(折算)</dt><dd>${costStr}</dd>
           <dt>待处理</dt><dd style="${pendingHighlight}">${inst.pending}</dd>
           <dt>上次上下文</dt><dd>${ctxStr}</dd>
           <dt>服务状态</dt>
@@ -517,7 +517,7 @@ async function renderSession() {
           </dd>
           <dt>新鲜度 (Fresh)</dt><dd>${data.session ? (data.session.fresh ? '是' : '否') : '--'}</dd>
           <dt>创建时间</dt><dd>${data.session ? new Date(data.session.created_at).toLocaleString() : '--'}</dd>
-          <dt>累计成本</dt><dd>$${(data.total_cost_usd || 0).toFixed(4)}</dd>
+          <dt>会话累计(API 折算)</dt><dd>$${(data.total_cost_usd || 0).toFixed(2)} <span class="ui-muted" style="font-size:12px">订阅账号不按此计费,反映的是额度消耗</span></dd>
         </div>
       </div>
       
@@ -634,7 +634,7 @@ async function renderSession() {
                 }
                 let r = chartData.rounds[idx];
                 let ctx = r.context_tokens >= 1000 ? (r.context_tokens/1000).toFixed(1) + 'k' : r.context_tokens;
-                legendDiv.innerHTML = `卡 #${r.issue_id} &middot; ${timeFmt(r.started_at)} &middot; 上下文 ${ctx} &middot; 输出 ${r.output_tokens} &middot; $${r.cost_usd.toFixed(2)} &middot; <strong style="color:${css('--text')}">${r.outcome}</strong>`;
+                legendDiv.innerHTML = `卡 #${r.issue_id} &middot; ${timeFmt(r.started_at)} &middot; 上下文 ${ctx} &middot; 输出 ${r.output_tokens} &middot; ${r.cost_usd == null ? '成本未知' : '$' + r.cost_usd.toFixed(2)} &middot; <strong style="color:${css('--text')}">${r.outcome}</strong>`;
               }
             ]
           }

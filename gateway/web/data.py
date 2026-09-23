@@ -284,7 +284,14 @@ def session(inst: str) -> dict:
     s = dbm.session_get(conn)
     rnds = [dict(r) for r in dbm.rounds(conn)]
     hist = [dict(r) for r in dbm.session_history(conn)]
-    total = conn.execute('SELECT COALESCE(SUM(cost_usd),0) FROM rounds').fetchone()[0]
+    # 当前会话累计:直接取 CLI 报的最新累计值,和 claude 自己的口径一致
+    total = 0.0
+    if s:
+        r = conn.execute('SELECT MAX(cost_cum_usd) FROM rounds WHERE session_id=?',
+                         (s['session_id'],)).fetchone()
+        total = float(r[0] or 0.0)
+    if not total:
+        total = conn.execute('SELECT COALESCE(SUM(cost_usd),0) FROM rounds').fetchone()[0]
     conn.close()
     cur = dict(s) if s else None
     if cur:

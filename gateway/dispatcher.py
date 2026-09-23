@@ -93,13 +93,17 @@ def process_card(conn, cfg, client, it) -> str:
     dbm.update_issue(conn, iid, woke_from_defer=0)   # 标记用完即清,下一轮不再当复查
     res = claude_runner.run_claude(cfg, cfg.paths.workspace, prompt, sid, resume=not fresh,
                                    log_file=cfg.paths.logs / 'claude-stream.jsonl')
-    cost = float((res.result or {}).get('total_cost_usd') or 0.0)
+    # total_cost_usd 是**会话累计**,不是本轮花费(2026-09-23 发现:同一会话里只增不减,
+    # 从 0.64 涨到 43.46)。本轮 = 本次累计 − 上一轮累计。新会话的第一轮累计就是本轮。
+    cum = float((res.result or {}).get('total_cost_usd') or 0.0)
+    prev_cum = None if fresh else dbm.session_cost_cum(conn, sid)
+    cost = max(cum - (prev_cum or 0.0), 0.0) if (fresh or prev_cum is not None) else None
     out_tokens = int((res.usage or {}).get('output_tokens') or 0)
 
     def _round(outcome):
         dbm.insert_round(conn, issue_id=iid, session_id=sid, started_at=started, ended_at=dbm.now_ms(),
                          rc=res.rc, context_tokens=res.context_tokens, output_tokens=out_tokens,
-                         cost_usd=cost, outcome=outcome)
+                         cost_usd=cost, cost_cum_usd=cum or None, outcome=outcome)
 
     if res.resume_failed:
         new_sid = dbm.session_rotate(conn, 'resume_failed')

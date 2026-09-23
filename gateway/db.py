@@ -100,7 +100,8 @@ CREATE TABLE IF NOT EXISTS rounds (
   rc             INTEGER,
   context_tokens INTEGER,
   output_tokens  INTEGER,
-  cost_usd       REAL,
+  cost_usd       REAL,         -- 本轮增量(API 折算价)
+  cost_cum_usd   REAL,         -- CLI 报的会话累计值,算增量用
   outcome        TEXT          -- answered/waiting/open/stuck/rotated
 );
 CREATE INDEX IF NOT EXISTS ix_rounds_issue ON rounds(issue_id);
@@ -135,6 +136,9 @@ def _migrate(conn):
     for col, ddl in (('defer_count', 'INTEGER DEFAULT 0'), ('woke_from_defer', 'INTEGER DEFAULT 0')):
         if col not in have:
             conn.execute(f'ALTER TABLE issues ADD COLUMN {col} {ddl}')
+    rcols = {r[1] for r in conn.execute('PRAGMA table_info(rounds)')}
+    if rcols and 'cost_cum_usd' not in rcols:
+        conn.execute('ALTER TABLE rounds ADD COLUMN cost_cum_usd REAL')
 
 
 def connect(path: str | Path) -> sqlite3.Connection:
@@ -265,17 +269,24 @@ def session_mark_used(conn, usage: dict | None = None):
                  (json.dumps(usage, ensure_ascii=False) if usage else None,))
 
 
+def session_cost_cum(conn, session_id: str) -> float | None:
+    """这个会话上一轮记下的累计值。没有记录返回 None。"""
+    r = conn.execute('SELECT cost_cum_usd FROM rounds WHERE session_id=? AND cost_cum_usd IS NOT NULL '
+                     'ORDER BY started_at DESC, round_id DESC LIMIT 1', (session_id,)).fetchone()
+    return float(r[0]) if r else None
+
+
 def insert_round(conn, *, issue_id, session_id, started_at, ended_at, rc, context_tokens,
-                 output_tokens, cost_usd, outcome):
+                 output_tokens, cost_usd, outcome, cost_cum_usd=None):
     """一轮 claude 的账。页面的成本与会话曲线读这张表。
 
     claude-stream.jsonl 里有 token 与 total_cost_usd,但没有卡号,对不上卡;
     session 表只留当前与上一个 id,没有完整轮换史。所以两样都在这里落库(2026-09-21)。
     """
     conn.execute('INSERT INTO rounds(issue_id,session_id,started_at,ended_at,rc,context_tokens,'
-                 'output_tokens,cost_usd,outcome) VALUES(?,?,?,?,?,?,?,?,?)',
+                 'output_tokens,cost_usd,cost_cum_usd,outcome) VALUES(?,?,?,?,?,?,?,?,?,?)',
                  (issue_id, session_id, started_at, ended_at, rc, context_tokens, output_tokens,
-                  cost_usd, outcome))
+                  cost_usd, cost_cum_usd, outcome))
 
 
 def rounds(conn, limit: int = 200) -> list[sqlite3.Row]:
