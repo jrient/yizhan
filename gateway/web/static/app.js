@@ -75,6 +75,44 @@ function showToast(title, desc, type = 'info') {
   setTimeout(() => { if (t.parentNode) t.remove(); }, 5000);
 }
 
+
+// 卡状态 → 徽章。全站只在这里映射一次。
+// 设计体系里没有蓝色(刻意的),所以只用 base.css 已有的变体:
+//   已答复 ok 绿 · 处理中 running(强调色+脉冲,base.css 就是为「进行中」准备的)
+//   待处理 warn 黄(有人在等回复) · 卡死 danger 红 · 挂起等待/已关闭 idle 灰
+const STATE_BADGE = { answered: 'ok', answering: 'running', open: 'warn', stuck: 'danger', waiting: 'idle', closed: 'idle' };
+function stateBadge(state, label, suffix = '') {
+  const cls = STATE_BADGE[state] || 'idle';
+  return `<span class="ui-badge ${cls}"><span class="ui-dot"></span>${label}${suffix}</span>`;
+}
+
+function formatRelativeTime(ts) {
+  if (!ts) return '--';
+  const diff_s = Math.max(0, (Date.now() - new Date(ts)) / 1000);
+  if (diff_s < 60) return `${Math.floor(diff_s)}秒前`;
+  if (diff_s < 3600) return `${Math.floor(diff_s/60)}分钟前`;
+  if (diff_s < 86400) return `${Math.floor(diff_s/3600)}小时前`;
+  return `${Math.floor(diff_s/86400)}天前`;
+}
+
+function formatAbsoluteTime(ts) {
+  if (!ts) return '--';
+  const d = new Date(ts);
+  const now = new Date();
+  const isToday = d.getDate() === now.getDate() && 
+                  d.getMonth() === now.getMonth() && 
+                  d.getFullYear() === now.getFullYear();
+  const HH = String(d.getHours()).padStart(2, '0');
+  const MM = String(d.getMinutes()).padStart(2, '0');
+  if (isToday) {
+    return `${HH}:${MM}`;
+  } else {
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    return `${mm}-${dd} ${HH}:${MM}`;
+  }
+}
+
 async function apiAction(inst, action, data = {}) {
   const fd = new FormData();
   for (const k in data) fd.append(k, data[k]);
@@ -119,12 +157,11 @@ function renderInstances(instances) {
   wall.innerHTML = instances.map(inst => {
     let healthColor = inst.health === 'green' ? 'ok' : (inst.health === 'yellow' ? 'warn' : (inst.health === 'red' ? 'danger' : 'idle'));
     let h_reason = inst.health === 'green' ? '正常' : inst.health_reason;
-    let timeAgo = '';
-    if (inst.heartbeat_ago_s !== null && inst.heartbeat_ago_s !== undefined) {
-      if (inst.heartbeat_ago_s < 60) timeAgo = `${Math.floor(inst.heartbeat_ago_s)}秒前`;
-      else if (inst.heartbeat_ago_s < 3600) timeAgo = `${Math.floor(inst.heartbeat_ago_s/60)}分钟前`;
-      else timeAgo = `${Math.floor(inst.heartbeat_ago_s/3600)}小时前`;
-    }
+    
+    let actionTexts = [];
+    if (inst.last_msg_at) actionTexts.push(`${formatRelativeTime(inst.last_msg_at)}有人提问`);
+    if (inst.last_reply_at) actionTexts.push(`${formatRelativeTime(inst.last_reply_at)}回复`);
+    let lastActionText = actionTexts.length > 0 ? actionTexts.join(' · ') : '暂无动静';
     
     let btnText = inst.paused ? '恢复' : '暂停';
     let btnAction = inst.paused ? 'resume' : 'pause';
@@ -139,20 +176,19 @@ function renderInstances(instances) {
             <span class="ui-badge ${healthColor}"><span class="ui-dot"></span>${h_reason}</span>
             ${inst.inst}
           </h3>
-          <span class="ui-muted" style="font-size:12px;">心跳: ${timeAgo || '--'}</span>
         </div>
         
         <div class="ui-desc" style="margin-bottom: 16px;">
+          <dt>最后动静</dt><dd>${lastActionText}</dd>
           <dt>今日消息/卡/回复</dt><dd>${inst.today_msgs} / ${inst.today_cards} / ${inst.today_replies}</dd>
-          <dt>今日用量(折算)</dt><dd>${costStr}</dd>
           <dt>待处理</dt><dd style="${pendingHighlight}">${inst.pending}</dd>
-          <dt>上次上下文</dt><dd>${ctxStr}</dd>
+          <dt>今日用量(折算)</dt><dd>${costStr}</dd>
           <dt>服务状态</dt>
           <dd>
             <span class="ui-badge ${inst.units.listener === 'active' ? 'ok' : ''}">监听</span>
             <span class="ui-badge ${inst.units.timer === 'active' ? 'ok' : ''}">定时</span>
           </dd>
-          ${inst.last_alert ? `<dt>最近告警</dt><dd class="ui-muted" style="color:var(--danger)">${inst.last_alert.kind}</dd>` : ''}
+          ${inst.last_alert ? `<dt>最近告警</dt><dd class="ui-muted" style="color:var(--warn)">${inst.last_alert.label} (${formatRelativeTime(inst.last_alert.at)})</dd>` : ''}
         </div>
         
         <div class="row" style="border-top:1px solid var(--border-subtle); padding-top:12px; justify-content:space-between;">
@@ -227,11 +263,16 @@ async function renderOverview() {
     const res = await fetch(`/api/i/${window.INST}/overview`);
     const data = await res.json();
     
+    let actionTexts = [];
+    if (data.summary.last_msg_at) actionTexts.push(`${formatRelativeTime(data.summary.last_msg_at)}提问`);
+    if (data.summary.last_reply_at) actionTexts.push(`${formatRelativeTime(data.summary.last_reply_at)}回复`);
+    let lastActionText = actionTexts.length > 0 ? actionTexts.join(' · ') : '无';
+
     let html = `
       <div class="grid-3 mb-4">
         <div class="ui-stat">
-          <div class="label">心跳</div>
-          <div class="value">${data.summary.heartbeat_ago_s !== null ? data.summary.heartbeat_ago_s.toFixed(1) + 's' : '--'}</div>
+          <div class="label">最后动静</div>
+          <div class="value" style="font-size:16px;">${lastActionText}</div>
         </div>
         <div class="ui-stat">
           <div class="label">今日消息 / 卡</div>
@@ -242,13 +283,14 @@ async function renderOverview() {
           <div class="value" style="color:${data.summary.pending>0?'var(--warn)':'var(--text)'}">${data.summary.pending}</div>
         </div>
         <div class="ui-stat">
-          <div class="label">上次上下文</div>
+          <div class="label">会话上下文</div>
           <div class="value">${(data.summary.context_tokens/1000).toFixed(1)}k</div>
+          <div class="ui-muted" style="font-size:12px; margin-top:4px;">越大越慢,单轮越贵</div>
         </div>
         <div class="ui-stat">
           <div class="label">卡状态分布</div>
           <div class="value" style="font-size:16px; margin-top:8px;">
-             ${Object.entries(data.card_states).map(([k,v]) => `<span class="ui-tag">${k}: ${v}</span>`).join(' ')}
+             ${data.card_state_list ? data.card_state_list.map(st => stateBadge(st.state, st.label, `: ${st.n}`)).join(' ') : ''}
           </div>
         </div>
         <div class="ui-stat">
@@ -267,15 +309,16 @@ async function renderOverview() {
         </div>
         <div class="ui-card">
           <h3 class="ui-muted mb-4">最近告警</h3>
-          ${data.alerts.length === 0 ? '<p class="ui-muted">暂无告警</p>' : 
+          ${data.alerts && data.alerts.length > 0 ? 
             `<div class="ui-timeline">
               ${data.alerts.map(a => `
-                <div class="node danger">
-                  <div class="t-title">${a.kind}</div>
-                  <div class="t-time">${new Date(a.sent_at).toLocaleString()}</div>
+                <div class="node warn">
+                  <div class="t-title">${a.label}</div>
+                  ${a.text ? `<div class="t-desc" style="font-size:12px; color:var(--text-2); margin-top:4px;">${a.text}</div>` : ''}
+                  <div class="t-time">${formatAbsoluteTime(a.at)}</div>
                 </div>
               `).join('')}
-            </div>`
+            </div>` : '<p class="ui-muted">暂无告警</p>'
           }
         </div>
       </div>
@@ -307,7 +350,7 @@ async function renderOverview() {
         legendDiv.style.minHeight = '24px';
         legendDiv.style.fontSize = '14px';
         legendDiv.style.marginBottom = '8px';
-        legendDiv.innerHTML = '<span class="ui-muted">悬停查看数据</span>';
+        legendDiv.innerHTML = '<span style="color:' + css('--accent') + '">● 消息</span>' + '&nbsp;&nbsp;<span style="color:' + css('--warn') + '">● 卡</span>' + '&nbsp;&nbsp;<span class="ui-muted">悬停看每小时数字</span>';
         container.appendChild(legendDiv);
     
         const chartDiv = document.createElement('div');
@@ -331,7 +374,9 @@ async function renderOverview() {
               stroke: css('--text-2'),
               grid: { stroke: css('--border-subtle'), width: 1 },
               ticks: { stroke: css('--border-subtle'), width: 1 },
-              values: (u, vals) => vals.map(v => v >= 1000 ? (v/1000).toFixed(1) + 'k' : v)
+              // 消息数、卡数只能是整数,别出现 0.5 / 1.5 这种刻度
+              incrs: [1, 2, 5, 10, 20, 50, 100, 200, 500],
+              values: (u, vals) => vals.map(v => Number.isInteger(v) ? (v >= 1000 ? (v/1000).toFixed(1) + 'k' : v) : ''),
             }
           ],
           series: [
@@ -355,7 +400,7 @@ async function renderOverview() {
               (u) => {
                 const idx = u.cursor.idx;
                 if (idx === null || idx === undefined || idx < 0) {
-                  legendDiv.innerHTML = '<span class="ui-muted">悬停查看数据</span>';
+                  legendDiv.innerHTML = '<span style="color:' + css('--accent') + '">● 消息</span>' + '&nbsp;&nbsp;<span style="color:' + css('--warn') + '">● 卡</span>' + '&nbsp;&nbsp;<span class="ui-muted">悬停看每小时数字</span>';
                   return;
                 }
                 let d = new Date(x[idx] * 1000);
@@ -390,36 +435,39 @@ window.renderCards = async function(page = 1, state = '') {
         <div class="row mb-4">
           <select class="ui-select" onchange="renderCards(1, this.value)">
             <option value="">全部状态</option>
-            <option value="open" ${state==='open'?'selected':''}>Open</option>
-            <option value="answering" ${state==='answering'?'selected':''}>Answering</option>
-            <option value="answered" ${state==='answered'?'selected':''}>Answered</option>
-            <option value="waiting" ${state==='waiting'?'selected':''}>Waiting</option>
-            <option value="stuck" ${state==='stuck'?'selected':''}>Stuck</option>
+            <option value="open" ${state==='open'?'selected':''}>待处理</option>
+            <option value="answering" ${state==='answering'?'selected':''}>处理中</option>
+            <option value="answered" ${state==='answered'?'selected':''}>已答复</option>
+            <option value="waiting" ${state==='waiting'?'selected':''}>挂起等待</option>
+            <option value="stuck" ${state==='stuck'?'selected':''}>卡死</option>
           </select>
         </div>
-        <table class="ui-table">
-          <thead><tr><th>编号</th><th>状态</th><th>发起人</th><th>消息数</th><th>建于</th><th>首回耗时</th><th>重派</th></tr></thead>
+        <table class="ui-table cards-table">
+          <thead><tr><th>编号</th><th style="width:100%; max-width:0;">内容</th><th>发起人</th><th>来源</th><th>状态</th><th>回复</th><th>首回耗时</th><th>时间</th></tr></thead>
           <tbody>
             ${data.items.map(item => {
-              let badge = '';
-              if (item.state === 'answered') badge = 'ok';
-              else if (item.state === 'open') badge = 'info';
-              else if (item.state === 'answering') badge = 'running';
-              else if (item.state === 'stuck') badge = 'danger';
-              else badge = 'idle';
+              let badgeHtml = stateBadge(item.state, item.state_label);
               
-              let badgeHtml = `<span class="ui-badge ${badge}"><span class="ui-dot"></span>${item.state}</span>`;
-              if(item.state === 'open') badgeHtml = `<span class="ui-badge" style="color:var(--accent-text);border-color:var(--accent)"><span class="ui-dot"></span>open</span>`;
+              if (item.redispatch > 0) {
+                 badgeHtml += ` <span class="ui-tag danger" style="padding:0 4px; margin-left:4px" title="重派次数">↺${item.redispatch}</span>`;
+              }
+              
+              let firstReply = '--';
+              if (item.first_reply_s !== null) {
+                  if (item.first_reply_s < 60) firstReply = `${Math.floor(item.first_reply_s)}秒`;
+                  else firstReply = `${Math.floor(item.first_reply_s/60)}分${Math.floor(item.first_reply_s%60)}秒`;
+              }
               
               return `
               <tr style="cursor:pointer" onclick="openCardDrawer(${item.id})">
                 <td class="num">#${item.id}</td>
-                <td>${badgeHtml}</td>
+                <td style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${item.preview}">${item.preview || ''}</td>
                 <td style="max-width:120px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${item.sender_name}">${item.sender_name}</td>
-                <td class="num">${item.n_msgs}</td>
-                <td class="num">${new Date(item.created_at).toLocaleString()}</td>
-                <td class="num">${item.first_reply_s !== null ? item.first_reply_s + 's' : '--'}</td>
-                <td class="num">${item.redispatch}</td>
+                <td><span class="ui-tag">${item.source || '--'}</span></td>
+                <td>${badgeHtml}</td>
+                <td class="num">${item.n_replies}</td>
+                <td class="num">${firstReply}</td>
+                <td class="num">${formatAbsoluteTime(item.created_at)}</td>
               </tr>
             `}).join('')}
           </tbody>
@@ -459,14 +507,14 @@ window.openCardDrawer = async function(id) {
     
     let html = `
       <div class="ui-desc">
-        <dt>状态</dt><dd>${data.card.state}</dd>
-        <dt>发起人</dt><dd>${data.card.sender_id}</dd>
+        <dt>状态</dt><dd>${data.card.state_label || data.card.state}</dd>
+        <dt>发起人</dt><dd>${data.card.sender_name || data.card.sender_id}</dd>
       </div>
       
       <p class="sec-label mt-4 mb-4">消息</p>
       ${data.messages.map(m => `
         <div style="background:var(--surface-2); padding:10px; border-radius:var(--radius); margin-bottom:8px;">
-          <div class="ui-muted mb-4" style="font-size:12px;">${m.sender_name} @ ${new Date(m.at).toLocaleString()}</div>
+          <div class="ui-muted mb-4" style="font-size:12px;">${m.sender_name} @ ${formatAbsoluteTime(m.at)}</div>
           <div style="white-space:pre-wrap">${m.text}</div>
           ${m.images ? m.images.map(img => `<img src="${img}" style="max-width:100%; margin-top:8px; border-radius:4px;">`).join('') : ''}
         </div>
@@ -515,9 +563,10 @@ async function renderSession() {
                <button class="ui-btn" style="padding: 2px 6px; font-size: 11px;" onclick="navigator.clipboard.writeText('${data.session.session_id}'); showToast('已复制', '', 'ok')">复制</button>` 
               : '--'}
           </dd>
-          <dt>新鲜度 (Fresh)</dt><dd>${data.session ? (data.session.fresh ? '是' : '否') : '--'}</dd>
-          <dt>创建时间</dt><dd>${data.session ? new Date(data.session.created_at).toLocaleString() : '--'}</dd>
+          <dt>会话状态</dt><dd>${data.session ? (data.session.fresh ? '新会话,尚未开始' : '进行中') : '--'}</dd>
+          <dt>创建时间</dt><dd>${data.session ? formatAbsoluteTime(data.session.created_at) : '--'}</dd>
           <dt>会话累计(API 折算)</dt><dd>$${(data.total_cost_usd || 0).toFixed(2)} <span class="ui-muted" style="font-size:12px">订阅账号不按此计费,反映的是额度消耗</span></dd>
+          <dt>会话上下文</dt><dd>${data.rounds && data.rounds.length > 0 ? (data.rounds[data.rounds.length-1].context_tokens/1000).toFixed(1) + 'k' : '0'} <span class="ui-muted" style="font-size:12px">越大越慢,单轮越贵</span></dd>
         </div>
       </div>
       
@@ -534,8 +583,8 @@ async function renderSession() {
             ${data.rotations && data.rotations.length > 0 ? data.rotations.map(r => `
               <tr>
                 <td class="ui-mono">${r.session_id.substring(0,8)}...</td>
-                <td class="num">${new Date(r.created_at).toLocaleString()}</td>
-                <td class="num">${r.ended_at ? new Date(r.ended_at).toLocaleString() : '--'}</td>
+                <td class="num">${formatAbsoluteTime(r.created_at)}</td>
+                <td class="num">${r.ended_at ? formatAbsoluteTime(r.ended_at) : '--'}</td>
                 <td>${r.reason || '--'}</td>
               </tr>
             `).join('') : '<tr><td colspan="4" class="ui-muted" style="text-align:center">暂无轮换历史</td></tr>'}
@@ -619,10 +668,10 @@ async function renderSession() {
           ],
           series: [
             {},
-            { label: "answered", stroke: css('--accent'), fill: css('--accent'), paths: uPlot.paths.bars ? uPlot.paths.bars({ size: [0.6, 60] }) : null },
-            { label: "stuck", stroke: css('--danger'), fill: css('--danger'), paths: uPlot.paths.bars ? uPlot.paths.bars({ size: [0.6, 60] }) : null },
-            { label: "waiting", stroke: css('--warn'), fill: css('--warn'), paths: uPlot.paths.bars ? uPlot.paths.bars({ size: [0.6, 60] }) : null },
-            { label: "other", stroke: css('--idle'), fill: css('--idle'), paths: uPlot.paths.bars ? uPlot.paths.bars({ size: [0.6, 60] }) : null }
+            { label: "已答复", stroke: css('--accent'), fill: css('--accent'), paths: uPlot.paths.bars ? uPlot.paths.bars({ size: [0.6, 60] }) : null },
+            { label: "卡死", stroke: css('--danger'), fill: css('--danger'), paths: uPlot.paths.bars ? uPlot.paths.bars({ size: [0.6, 60] }) : null },
+            { label: "挂起等待", stroke: css('--warn'), fill: css('--warn'), paths: uPlot.paths.bars ? uPlot.paths.bars({ size: [0.6, 60] }) : null },
+            { label: "其他", stroke: css('--idle'), fill: css('--idle'), paths: uPlot.paths.bars ? uPlot.paths.bars({ size: [0.6, 60] }) : null }
           ],
           hooks: {
             setCursor: [
@@ -634,7 +683,14 @@ async function renderSession() {
                 }
                 let r = chartData.rounds[idx];
                 let ctx = r.context_tokens >= 1000 ? (r.context_tokens/1000).toFixed(1) + 'k' : r.context_tokens;
-                legendDiv.innerHTML = `卡 #${r.issue_id} &middot; ${timeFmt(r.started_at)} &middot; 上下文 ${ctx} &middot; 输出 ${r.output_tokens} &middot; ${r.cost_usd == null ? '成本未知' : '$' + r.cost_usd.toFixed(2)} &middot; <strong style="color:${css('--text')}">${r.outcome}</strong>`;
+                let outcomeLabel = r.outcome;
+                if (r.outcome === 'answered') outcomeLabel = '已答复';
+                else if (r.outcome === 'stuck') outcomeLabel = '卡死';
+                else if (r.outcome === 'waiting') outcomeLabel = '挂起等待';
+                else if (r.outcome === 'open') outcomeLabel = '待处理';
+                else if (r.outcome === 'answering') outcomeLabel = '处理中';
+                
+                legendDiv.innerHTML = `卡 #${r.issue_id} &middot; ${timeFmt(r.started_at)} &middot; 上下文 ${ctx} &middot; 输出 ${r.output_tokens} &middot; ${r.cost_usd == null ? '成本未知' : '$' + r.cost_usd.toFixed(2)} &middot; <strong style="color:${css('--text')}">${outcomeLabel}</strong>`;
               }
             ]
           }
