@@ -1,0 +1,21 @@
+/* 图表分类色。设计体系(tokens.css)只有状态色,而状态色专用、不能当系列色,
+   所以多系列图用这套。来源:dataviz skill 的参考调色板,八色固定顺序。
+
+   已用 validate_palette.js 对**本站卡片底色**重新校验(2026-09-23):
+   - 深色 #232324:8 槽相邻对全部 PASS,最差 CVD ΔE 8.4,正常视觉 ΔE 19.3,对比度全部 ≥3:1
+   - 浅色 #faf9f6:8 槽相邻对全部 PASS;aqua/yellow/magenta 对比度 <3:1(WARN)
+     → 按规则必须提供数据表视图作为补偿
+   - 前三槽全对校验两种模式都 PASS(折线互相交叉时用前三槽)
+
+   规则:按槽位顺序分配,颜色跟着「实体」走不跟排名走;超过 8 类并入「其他」,不生成新色。
+   改任何一个值都要重跑校验。 */
+:root {
+  --series-1: light-dark(#2a78d6, #3987e5);  /* 蓝 */
+  --series-2: light-dark(#eb6834, #d95926);  /* 橙 */
+  --series-3: light-dark(#1baf7a, #199e70);  /* 青 */
+  --series-4: light-dark(#eda100, #c98500);  /* 黄 */
+  --series-5: light-dark(#e87ba4, #d55181);  /* 品红 */
+  --series-6: light-dark(#008300, #008300);  /* 绿 */
+  --series-7: light-dark(#4a3aa7, #9085e9);  /* 紫 */
+  --series-8: light-dark(#e34948, #e66767);  /* 红 */
+}

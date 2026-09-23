@@ -24,7 +24,7 @@ def test_app_js_parses():
 
 def _defined_tokens() -> set[str]:
     out = set()
-    for f in (STATIC / 'tokens.css', STATIC / 'base.css'):
+    for f in (STATIC / 'tokens.css', STATIC / 'base.css', STATIC / 'chart-tokens.css'):
         out |= set(re.findall(r'^\s*(--[a-z0-9-]+)\s*:', f.read_text(), re.M))
     return out
 
