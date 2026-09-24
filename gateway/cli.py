@@ -9,7 +9,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from . import config as configmod, db as dbm
+from . import config as configmod, db as dbm, shared_rules
 from .paths import Paths, unit
 
 TEMPLATES = Path(__file__).parent / 'templates'
@@ -96,6 +96,7 @@ def cmd_init(a) -> int:
             continue
         _render(src, dst, mapping); n += 1
     (paths.workspace / 'notes').mkdir(exist_ok=True)
+    shared_rules.sync(paths.workspace)
 
     if a.from_dir:                      # 把旧 skill 的参考资料带过来
         src = Path(a.from_dir).expanduser()

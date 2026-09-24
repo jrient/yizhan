@@ -12,7 +12,7 @@ from pathlib import Path
 
 from .config import in_work_hours
 from .paths import unescape_inst, unit
-from . import cards, claude_runner, config as configmod, db as dbm
+from . import cards, claude_runner, config as configmod, db as dbm, shared_rules
 from .alerts import alert
 from .feishu import FeishuClient
 
@@ -95,6 +95,7 @@ def process_card(conn, cfg, client, it) -> str:
     started = dbm.now_ms()
     cards.lock_card(conn, cfg, iid, f'pid:{time.time():.0f}', started)
     dbm.update_issue(conn, iid, woke_from_defer=0)   # 标记用完即清,下一轮不再当复查
+    shared_rules.sync(cfg.paths.workspace)          # 公共规矩每次唤起前对齐仓库那一份
     res = claude_runner.run_claude(cfg, cfg.paths.workspace, prompt, sid, resume=not fresh,
                                    log_file=cfg.paths.logs / 'claude-stream.jsonl')
     # total_cost_usd 是**会话累计**,不是本轮花费(2026-09-23 发现:同一会话里只增不减,

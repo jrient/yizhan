@@ -67,6 +67,13 @@ http_proxy  = ""                       # 不要
 
 飞书接口不走代理,客户端已经关了 `trust_env`,两边互不影响。
 
+## 公共规矩
+
+所有机器人共用一份「本来就不许做的事」:`shared/shared-rules.md`。只改这一个文件。
+dispatcher 每次唤起 claude 前把它同步到工作台,并保证工作台 `CLAUDE.md` 里有 `@shared-rules.md` 引用;
+机器人在工作台里改了也会被覆盖回去。文件名必须是英文,中文文件名的 `@` 引用在 `claude -p` 下不生效。
+项目专属的写法(比如 drama-auto 查库)仍写在各自 skill 里。
+
 ## 工作时段
 
 所有实例默认只在北京时间 06:00-24:00 派单(`gateway/config.py` 的 `DEFAULT_WORK_HOURS`)。
