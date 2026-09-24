@@ -14,11 +14,24 @@ class EvidenceError(Exception):
 _WEASEL = ['凭经验', '凭印象', '常识', '我记得', '应该是', '推测', '猜', '一般来说', '按理', '大概', '估计', '差不多']
 _EMPTY = {'无', '没有', 'n/a', 'na', '-', '略', '同上'}
 
+# 每类证据能通过校验的写法示例,拒绝时直接给出来
+EXAMPLES = {
+    'frame':  '抽帧 g1_8.0.jpg 第8秒',
+    'config': '库里 prompts 行 id 126 / 任务249839 / SKILL.md 第3行 / cards.py:120',
+    'time':   'create_time=1790217653320 / date 输出 10:40',
+    'error':  'error_code=OutputVideoSensitiveContentDetected / payload 里 ratio 字段',
+    'script': '第12集 3-2 场原文「……」',
+    'other':  '出处即可,如「负责人 10:56 群里原话」',
+}
+
 TYPES = {
     'frame':  ('画面内容:画错/漏拍/多人/背景不对/朝向站位', '帧文件名 + 秒数',
                r'\.jpe?g|\.png|第\s*\d+\s*秒|\bt?\d+s\b|抽帧'),
+    # 行 id 与行号的写法放宽(2026-09-24 创视助手卡 #5):「行 id 249839」「第3行」「任务249839」都是真出处,
+    # 原来只认 id= 和 :行号,误拒后机器人去翻 fgctl 源码研究怎么凑格式。
     'config': ('提示词、配置、版本现状', '库里的行 id / 文件名+行号',
-               r'id\s*=|SELECT|prompt_history|prompts|\.py|\.ts|\.tsx|:\d+|库查|查库'),
+               r'id\s*[=:：]?\s*\d+|第\s*\d+\s*行|任务\s*\d{3,}|SELECT|prompt_history|prompts'
+               r'|\.py|\.ts|\.tsx|\.md|:\d+|库查|查库'),
     'time':   ('任何时间点', 'date 输出或 create_time 字段',
                r'date|create_time|created_at|UTC|CST|\d{1,2}:\d{2}'),
     'error':  ('失败原因', '实发 payload 或 error 字段原文',
@@ -61,7 +74,9 @@ def check(kinds_raw: str | None, ev: str | None, text: str) -> tuple[str, str]:
         pat = TYPES[k][2]
         if pat and not re.search(pat, ev, re.I):
             raise EvidenceError(f'拒发:--type {k} 的证据里找不到「{TYPES[k][1]}」。\n  {TYPES[k][0]}\n'
-                                f'  现在的证据:{ev[:120]}\n这类结论必须拿得出这一项,否则就是在凭印象说。')
+                                f'  现在的证据:{ev[:120]}\n'
+                                f'  能通过的写法例如:{EXAMPLES[k]}\n'
+                                '这类结论必须拿得出这一项,否则就是在凭印象说。真查过就把出处写具体,不要去研究校验规则。')
     if re.search(r'已(经)?核实|已确认|确认过|逐字核对', text or '') and len(ev) < 25:
         raise EvidenceError(f'拒发:正文里写了「已核实/已确认」,但证据只有 {len(ev)} 字。\n'
                             '这四个字只能在真的逐字核对过之后用。')
