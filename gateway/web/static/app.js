@@ -283,69 +283,190 @@ async function renderOverview() {
   try {
     const res = await fetch(`/api/i/${window.INST}/overview`);
     const data = await res.json();
+    const sum = data.summary;
     
-    let actionTexts = [];
-    if (data.summary.last_msg_at) actionTexts.push(`${formatRelativeTime(data.summary.last_msg_at)}提问`);
-    if (data.summary.last_reply_at) actionTexts.push(`${formatRelativeTime(data.summary.last_reply_at)}回复`);
-    let lastActionText = actionTexts.length > 0 ? actionTexts.join(' · ') : '无';
-
+    let hColor = sum.health === 'green' ? 'ok' : (sum.health === 'yellow' ? 'warn' : (sum.health === 'red' ? 'danger' : 'idle'));
+    
+    let listenerBad = sum.units.listener !== 'active' || sum.heartbeat_ago_s === null || sum.heartbeat_ago_s > 600;
+    let listenerHtml = `<span class="ui-dot" style="color:var(${listenerBad ? '--danger' : '--ok'})"></span>${sum.heartbeat_ago_s !== null ? '心跳 '+Math.floor(sum.heartbeat_ago_s)+' 秒前' : '无心跳'}`;
+    let listenerColor = '';
+    
+    let dispatchText = '';
+    if (data.dispatcher_active) {
+      dispatchText = '正在处理';
+    } else {
+      let rc = sum.units.dispatcher_last ? sum.units.dispatcher_last.rc : -1;
+      let atStr = sum.units.dispatcher_last ? sum.units.dispatcher_last.at : '';
+      let match = atStr.match(/\b(\d{2}:\d{2})\b/);
+      let hhmm = match ? match[1] : '';
+      let okStr = rc === 0 ? '成功' : '失败';
+      dispatchText = `上一轮 ${hhmm} ${okStr}`;
+    }
+    
+    let focusText = '空闲,等新消息';
+    let focusColor = '';
+    let focusDrawer = '';
+    if (data.current_card) {
+      focusText = `卡 #${data.current_card.id} ${esc(data.current_card.preview)}`;
+      focusDrawer = `onclick="openCardDrawer(${data.current_card.id})" style="cursor:pointer"`;
+    } else if (data.stuck_cards && data.stuck_cards.length > 0) {
+      focusText = `${data.stuck_cards.length} 张卡死`;
+      focusColor = 'color:var(--danger)';
+    }
+    
+    let ctxTokens = sum.context_tokens || 0;
+    let ctxWin = sum.context_window;
+    let ctxText = Math.round(ctxTokens/1000) + 'k';
+    let ctxBar = '';
+    if (ctxWin) {
+      let pct = Math.min(100, Math.max(0, (ctxTokens / ctxWin) * 100));
+      let barColor = pct >= 90 ? 'var(--danger)' : (pct >= 70 ? 'var(--warn)' : 'var(--accent)');
+      ctxBar = `
+        <div class="ui-progress mt-4" style="height:4px; background:var(--surface-2); border-radius:2px; overflow:hidden">
+          <div style="width:${pct}%; background:${barColor}; height:100%"></div>
+        </div>
+        <div class="ui-muted mt-4" style="font-size:12px">/ ${Math.round(ctxWin/1000000)}M 窗口</div>
+      `;
+    }
+    
     let html = `
-      <div class="grid-3 mb-4">
-        <div class="ui-stat">
-          <div class="label">最后动静</div>
-          <div class="value" style="font-size:16px;">${lastActionText}</div>
-        </div>
-        <div class="ui-stat">
-          <div class="label">今日消息 / 卡</div>
-          <div class="value">${data.summary.today_msgs} / ${data.summary.today_cards}</div>
-        </div>
-        <div class="ui-stat">
-          <div class="label">待处理</div>
-          <div class="value" style="color:${data.summary.pending>0?'var(--warn)':'var(--text)'}">${data.summary.pending}</div>
-        </div>
-        <div class="ui-stat">
-          <div class="label">会话上下文</div>
-          <div class="value">${(data.summary.context_tokens/1000).toFixed(1)}k</div>
-          <div class="ui-muted" style="font-size:12px; margin-top:4px;">越大越慢,单轮越贵</div>
-        </div>
-        <div class="ui-stat">
-          <div class="label">卡状态分布</div>
-          <div class="value" style="font-size:16px; margin-top:8px;">
-             ${data.card_state_list ? data.card_state_list.map(st => stateBadge(st.state, st.label, `: ${st.n}`)).join(' ') : ''}
-          </div>
-        </div>
-        <div class="ui-stat">
-          <div class="label">服务与定时器</div>
-          <div class="value" style="font-size:16px; margin-top:8px; line-height: 1.5;">
-            <div style="font-size: 13px;">下一轮: <span class="ui-mono">${esc(data.timer_next || (data.dispatcher_active ? '正在处理中' : '待定'))}</span></div>
-            <div style="font-size: 13px;">技能: <span class="ui-mono">${esc(data.skill || '--')}</span></div>
-          </div>
-        </div>
-      </div>
-      
-      <div class="grid-2">
+      <div class="grid-5-to-2 mb-4">
         <div class="ui-card">
-          <h3 class="ui-muted mb-4">今日趋势</h3>
-          <div id="overview-chart" class="chart-container"></div>
+          <div class="ui-muted mb-4" style="font-size:12px">健康</div>
+          <div style="font-size:14px; font-weight:500; display:flex; align-items:center; gap:6px"><span class="ui-dot" style="background:var(--${hColor})"></span>${esc(sum.health_reason)}</div>
         </div>
         <div class="ui-card">
-          <h3 class="ui-muted mb-4">最近告警</h3>
-          ${data.alerts && data.alerts.length > 0 ? 
-            `<div class="ui-timeline">
-              ${data.alerts.map(a => `
-                <div class="node warn">
-                  <div class="t-title">${esc(a.label)}</div>
-                  ${a.text ? `<div class="t-desc" style="font-size:12px; color:var(--text-2); margin-top:4px;">${esc(a.text)}</div>` : ''}
-                  <div class="t-time">${formatAbsoluteTime(a.at)}</div>
-                </div>
-              `).join('')}
-            </div>` : '<p class="ui-muted">暂无告警</p>'
-          }
+          <div class="ui-muted mb-4" style="font-size:12px">监听</div>
+          <div style="font-size:14px; font-weight:500; display:flex; align-items:center; gap:6px; ${listenerColor}">${listenerHtml}</div>
+        </div>
+        <div class="ui-card">
+          <div class="ui-muted mb-4" style="font-size:12px">派卡</div>
+          <div style="font-size:14px; font-weight:500">${esc(dispatchText)}</div>
+        </div>
+        <div class="ui-card" ${focusDrawer}>
+          <div class="ui-muted mb-4" style="font-size:12px">当前焦点</div>
+          <div style="font-size:14px; font-weight:500; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; ${focusColor}" title="${esc(focusText)}">${focusText}</div>
+        </div>
+        <div class="ui-card">
+          <div class="ui-muted mb-4" style="font-size:12px">上下文</div>
+          <div style="font-size:20px; font-weight:bold">${ctxText}</div>
+          ${ctxBar}
         </div>
       </div>
     `;
-    document.getElementById('tab-content').innerHTML = html;
+
+    let alerts24h = [];
+    let alertsOlder = [];
+    const now = Date.now();
+    if (data.alerts) {
+      data.alerts.forEach(a => {
+        if (now - a.at < 24*3600*1000) alerts24h.push(a);
+        else alertsOlder.push(a);
+      });
+    }
     
+    let renderAlert = (a) => {
+      let isCard = a.label.startsWith('卡 #');
+      let titleHtml = esc(a.label);
+      if (isCard) {
+        let cidMatch = a.label.match(/^卡 #(\d+)/);
+        if (cidMatch) {
+          titleHtml = `<span onclick="openCardDrawer(${cidMatch[1]}); event.preventDefault();" style="cursor:pointer; color:var(--accent)">卡 #${cidMatch[1]}</span>${esc(a.label.substring(cidMatch[0].length))}`;
+        }
+      }
+      if (a.text) {
+        return `
+          <details class="ui-accordion">
+            <summary style="display:flex; justify-content:space-between; align-items:center"><div style="flex:1">${titleHtml}</div><div class="ui-muted" style="font-size:12px; font-weight:normal; margin-right:8px">${formatAbsoluteTime(a.at)}</div></summary>
+            <div class="content"><pre class="ui-code wrap">${esc(a.text)}</pre></div>
+          </details>
+        `;
+      } else {
+        return `
+          <div class="ui-accordion" style="display:flex; padding:12px; border-bottom:1px solid var(--border-subtle); align-items:center">
+            <div style="flex:1">${titleHtml}</div><div class="ui-muted" style="font-size:12px">${formatAbsoluteTime(a.at)}</div>
+          </div>
+        `;
+      }
+    };
+
+    html += `
+      <div class="ui-card mb-4">
+        <div class="row mb-4" style="justify-content:space-between">
+          <h3 style="margin:0">告警</h3>
+          <div class="ui-muted" style="font-size:12px">24 小时内 ${alerts24h.length} 条</div>
+        </div>
+    `;
+    if (alerts24h.length === 0) {
+      html += `<div class="ui-empty"><div class="desc">24 小时内没有告警</div></div>`;
+    } else {
+      html += alerts24h.map(renderAlert).join('');
+    }
+    if (alertsOlder.length > 0) {
+      html += `
+        <details class="ui-accordion mt-4" style="border:1px solid var(--border); border-radius:4px">
+          <summary>更早 ${alertsOlder.length} 条</summary>
+          <div class="content" style="padding:0">
+            ${alertsOlder.map(renderAlert).join('')}
+          </div>
+        </details>
+      `;
+    }
+    html += `</div>`;
+
+    let fTime = sum.today_first_reply_p50_s;
+    let p50Str = '—';
+    if (fTime !== null) {
+       p50Str = (fTime >= 60) ? `${Math.floor(fTime/60)}分${Math.round(fTime%60)}秒` : `${Math.round(fTime)}秒`;
+    }
+    
+    html += `
+      <div class="grid-2" style="align-items: stretch;">
+        <div class="ui-card" style="display:flex; flex-direction:column;">
+          <h3 class="ui-muted mb-4">今日</h3>
+          <div class="row mb-4" style="font-size:14px; gap:16px;">
+            <div>消息 <strong>${sum.today_msgs}</strong></div>
+            <div>卡 <strong>${sum.today_cards}</strong></div>
+            <div>回复 <strong>${sum.today_replies}</strong></div>
+            <div>首回中位 <strong>${p50Str}</strong></div>
+            <div>用量 <strong>$${(sum.today_cost_usd||0).toFixed(2)}</strong> <span class="ui-muted" style="font-size:12px">API 折算</span></div>
+          </div>
+          <div id="overview-chart" class="chart-container" style="flex:1;"></div>
+        </div>
+        <div class="ui-card" style="display:flex; flex-direction:column;">
+          <h3 class="ui-muted mb-4">最近的卡</h3>
+          <div class="recent-cards" style="flex:1;">
+    `;
+    if (data.recent_cards && data.recent_cards.length > 0) {
+      html += data.recent_cards.map(c => {
+         let rTime = c.first_reply_s !== null ? (c.first_reply_s >= 60 ? `${Math.floor(c.first_reply_s/60)}分${Math.round(c.first_reply_s%60)}秒` : `${Math.round(c.first_reply_s)}秒`) : '--';
+         return `
+           <div class="row" style="cursor:pointer; padding:8px 0; border-bottom:1px solid var(--border-subtle); flex-wrap:nowrap; align-items:center;" onclick="openCardDrawer(${c.id})">
+             <div class="ui-mono" style="font-size:12px; width:40px; flex-shrink:0">#${c.id}</div>
+             <div style="width:70px; flex-shrink:0">${stateBadge(c.state, c.state_label)}</div>
+             <div style="width:70px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-size:13px; flex-shrink:0">${esc(c.sender_name)}</div>
+             <div style="flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-size:13px; min-width:0" title="${esc(c.preview)}">${esc(c.preview)}</div>
+             <div class="ui-muted" style="width:50px; font-size:12px; text-align:right; flex-shrink:0">${rTime}</div>
+             <div class="ui-muted" style="width:50px; font-size:12px; text-align:right; flex-shrink:0">${formatRelativeTime(c.created_at)}</div>
+           </div>
+         `;
+      }).join('');
+      html += `
+          <div class="mt-4 pt-4" style="text-align:center">
+            <a href="#" onclick="event.preventDefault(); switchTab('cards')" style="color:var(--accent); font-size:13px; text-decoration:none">全部卡 →</a>
+          </div>
+      `;
+    } else {
+      html += `<div class="ui-empty" style="height:100%"><div class="desc">还没有卡</div></div>`;
+    }
+    html += `
+          </div>
+        </div>
+      </div>
+    `;
+
+    document.getElementById('tab-content').innerHTML = html;
+
     window.drawOverviewChart = function(chartData) {
       overviewChartData = chartData;
       const container = document.getElementById('overview-chart');
@@ -356,91 +477,97 @@ async function renderOverview() {
         overviewChartInst = null;
       }
       
-      if (chartData.hourly && chartData.hourly.length > 0) {
-        let x = chartData.hourly.map(h => {
-          let d = new Date();
-          d.setHours(parseInt(h.hour), 0, 0, 0);
-          return Math.floor(d.getTime()/1000);
-        });
-        let msgs = chartData.hourly.map(h => h.msgs);
-        let cards = chartData.hourly.map(h => h.cards);
-        
-        const legendDiv = document.createElement('div');
-        legendDiv.style.textAlign = 'center';
-        legendDiv.style.color = css('--text');
-        legendDiv.style.minHeight = '24px';
-        legendDiv.style.fontSize = '14px';
-        legendDiv.style.marginBottom = '8px';
-        legendDiv.innerHTML = '<span style="color:' + css('--accent') + '">● 消息</span>' + '&nbsp;&nbsp;<span style="color:' + css('--warn') + '">● 卡</span>' + '&nbsp;&nbsp;<span class="ui-muted">悬停看每小时数字</span>';
-        container.appendChild(legendDiv);
-    
-        const chartDiv = document.createElement('div');
-        container.appendChild(chartDiv);
-    
-        const opts = {
-          width: container.clientWidth,
-          height: 250,
-          legend: { show: false },
-          axes: [
-            {
-              stroke: css('--text-2'),
-              grid: { stroke: css('--border-subtle'), width: 1 },
-              ticks: { stroke: css('--border-subtle'), width: 1 },
-              values: (u, vals) => vals.map(v => {
-                let d = new Date(v * 1000);
-                return `${d.getHours()}:00`;
-              })
-            },
-            {
-              stroke: css('--text-2'),
-              grid: { stroke: css('--border-subtle'), width: 1 },
-              ticks: { stroke: css('--border-subtle'), width: 1 },
-              // 消息数、卡数只能是整数,别出现 0.5 / 1.5 这种刻度
-              incrs: [1, 2, 5, 10, 20, 50, 100, 200, 500],
-              values: (u, vals) => vals.map(v => Number.isInteger(v) ? (v >= 1000 ? (v/1000).toFixed(1) + 'k' : v) : ''),
-            }
-          ],
-          series: [
-            {},
-            {
-              label: "消息",
-              stroke: css('--accent'),
-              fill: css('--accent-ring'),
-              width: 2,
-              points: { show: true, fill: css('--bg'), stroke: css('--accent'), size: 6 }
-            },
-            {
-              label: "卡片",
-              stroke: css('--warn'),
-              width: 2,
-              points: { show: true, fill: css('--bg'), stroke: css('--warn'), size: 6 }
-            }
-          ],
-          hooks: {
-            setCursor: [
-              (u) => {
-                const idx = u.cursor.idx;
-                if (idx === null || idx === undefined || idx < 0) {
-                  legendDiv.innerHTML = '<span style="color:' + css('--accent') + '">● 消息</span>' + '&nbsp;&nbsp;<span style="color:' + css('--warn') + '">● 卡</span>' + '&nbsp;&nbsp;<span class="ui-muted">悬停看每小时数字</span>';
-                  return;
-                }
-                let d = new Date(x[idx] * 1000);
-                legendDiv.innerHTML = `${d.getHours()}:00 &middot; 消息 <strong style="color:${css('--accent')}">${msgs[idx]}</strong> &middot; 卡 <strong style="color:${css('--warn')}">${cards[idx]}</strong>`;
-              }
-            ]
-          }
-        };
-        overviewChartInst = new uPlot(opts, [x, msgs, cards], chartDiv);
-      } else {
-        container.innerHTML = '<div class="ui-empty"><div class="desc">暂无趋势数据</div></div>';
+      let allZeros = !chartData.hourly || chartData.hourly.length === 0 || chartData.hourly.every(h => h.msgs === 0 && h.cards === 0);
+      if (allZeros) {
+        container.innerHTML = '<div class="ui-empty"><div class="desc">今天还没有消息</div></div>';
+        return;
       }
+      
+      let x = chartData.hourly.map(h => {
+        let d = new Date();
+        d.setHours(parseInt(h.hour), 0, 0, 0);
+        return Math.floor(d.getTime()/1000);
+      });
+      let msgs = chartData.hourly.map(h => h.msgs);
+      let cards = chartData.hourly.map(h => h.cards);
+      
+      const legendDiv = document.createElement('div');
+      legendDiv.style.textAlign = 'center';
+      legendDiv.style.minHeight = '24px';
+      legendDiv.style.fontSize = '14px';
+      legendDiv.style.marginBottom = '8px';
+      legendDiv.innerHTML = legendKey(css('--series-1'), '消息', 'rect') + legendKey(css('--series-2'), '卡', 'rect') + '<span class="ui-muted">悬停看每小时数字</span>';
+      container.appendChild(legendDiv);
+  
+      const chartDiv = document.createElement('div');
+      container.appendChild(chartDiv);
+  
+      const opts = {
+        width: container.clientWidth,
+        height: 200,
+        legend: { show: false },
+        axes: [
+          {
+            stroke: css('--text-2'),
+            grid: { stroke: css('--border-subtle'), width: 1 },
+            ticks: { stroke: css('--border-subtle'), width: 1 },
+            values: (u, vals) => vals.map(v => {
+              let d = new Date(v * 1000);
+              return `${d.getHours()}:00`;
+            })
+          },
+          {
+            stroke: css('--text-2'),
+            grid: { stroke: css('--border-subtle'), width: 1 },
+            ticks: { stroke: css('--border-subtle'), width: 1 },
+            incrs: [1, 2, 5, 10, 20, 50, 100, 200, 500],
+            values: (u, vals) => vals.map(v => Number.isInteger(v) ? v : ''),
+          }
+        ],
+        scales: {
+          x: { time: false, range: (u, min, max) => [min - 1800, max + 1800] },
+          y: { range: (u, min, max) => [0, (max || 1) * 1.15] }
+        },
+        series: [
+          {},
+          {
+            label: "消息",
+            stroke: css('--bg'),
+            width: 2,
+            fill: css('--series-1'),
+            points: { show: false },
+            paths: uPlot.paths.bars ? uPlot.paths.bars({ size: [0.4, 60], align: -1, radius: BAR_RADIUS }) : null
+          },
+          {
+            label: "卡",
+            stroke: css('--bg'),
+            width: 2,
+            fill: css('--series-2'),
+            points: { show: false },
+            paths: uPlot.paths.bars ? uPlot.paths.bars({ size: [0.4, 60], align: 1, radius: BAR_RADIUS }) : null
+          }
+        ],
+        hooks: {
+          setCursor: [
+            (u) => {
+              const idx = u.cursor.idx;
+              if (idx === null || idx === undefined || idx < 0) {
+                legendDiv.innerHTML = legendKey(css('--series-1'), '消息', 'rect') + legendKey(css('--series-2'), '卡', 'rect') + '<span class="ui-muted">悬停看每小时数字</span>';
+                return;
+              }
+              let d = new Date(x[idx] * 1000);
+              legendDiv.innerHTML = `${d.getHours()}:00 &middot; 消息 <strong style="color:${css('--series-1')}">${msgs[idx]}</strong> &middot; 卡 <strong style="color:${css('--series-2')}">${cards[idx]}</strong>`;
+            }
+          ]
+        }
+      };
+      overviewChartInst = new uPlot(opts, [x, msgs, cards], chartDiv);
     };
-    
+
     if (window.drawOverviewChart) window.drawOverviewChart(data);
-    
+
   } catch(e) { console.error(e); }
 }
-
 // 2. Cards
 let currentCardsPage = 1;
 let currentCardsState = '';
@@ -965,7 +1092,7 @@ async function renderStats(days = currentStatsDays) {
         </div>
       </div>
       
-      <div class="grid-3 mb-4">
+      <div class="stats-kpi-grid mb-4">
         <div class="ui-stat">
           <div class="label">消息 / 卡 / 回复</div>
           <div class="value">${k.msgs} / ${k.cards} / ${k.replies}</div>
@@ -1014,7 +1141,6 @@ function renderStatsCharts() {
   const daysArr = d.daily.map(x => x.day);
   const xVals = daysArr.map((day, i) => i);
   
-  // Format MM-DD to show a few if 30 days
   const xLabelFmt = (u, vals) => vals.map(v => {
     if (v !== Math.floor(v)) return '';
     if (v >= 0 && v < daysArr.length) {
@@ -1055,7 +1181,7 @@ function renderStatsCharts() {
       type: 'bar',
       legendHtml: '',
       seriesNames: ['用量'],
-      dataList: [xVals, d.daily.map(x => x.cost_usd || null)],   // 0 → null:零高度柱子也会描边成短横
+      dataList: [xVals, d.daily.map(x => x.cost_usd || null)],
       seriesArgs: [
         { stroke: css('--surface'), width: 2, fill: css('--accent'), points: { show: false }, paths: uPlot.paths.bars ? uPlot.paths.bars({ size: [0.6, 60], radius: BAR_RADIUS }) : null }
       ],
@@ -1101,11 +1227,43 @@ function renderStatsCharts() {
     }
   ];
   
-  // Custom processing for chart 4 (stacked bar)
+  let ctxData = d.context || [];
+  if (ctxData.length === 0) {
+    chartConfigs.push({
+      title: '每轮上下文',
+      sub: '越长越慢、单轮越贵;接近窗口会被自动压缩',
+      id: 'stat-chart-6',
+      hasData: false,
+      emptyMsg: `近 ${currentStatsDays} 天没有派卡`,
+      type: 'context_line'
+    });
+  } else {
+    let ctxX = ctxData.map(c => Math.floor(c.at / 1000));
+    let ctxY = ctxData.map(c => c.context_tokens);
+    chartConfigs.push({
+      title: '每轮上下文',
+      sub: '越长越慢、单轮越贵;接近窗口会被自动压缩',
+      id: 'stat-chart-6',
+      hasData: true,
+      emptyMsg: '',
+      type: 'context_line',
+      tableHeads: ['时间', '卡', '上下文', '用量($)'],
+      tableRows: ctxData.map(c => [formatAbsoluteTime(c.at), `#${c.issue_id}`, c.context_tokens, c.cost_usd != null ? c.cost_usd.toFixed(2) : '--']),
+      dataList: [ctxX, ctxY],
+      seriesNames: ['上下文'],
+      seriesArgs: [
+        { stroke: css('--accent'), width: 2, points: { show: true, size: 8, fill: css('--bg'), stroke: css('--accent') } }
+      ],
+      hoverColors: [css('--accent')],
+      axes: { isInteger: true },
+      originalData: [ctxY],
+      ctxData: ctxData
+    });
+  }
+
   const chart4 = chartConfigs[3];
   if (chart4.hasData) {
-    const ERROR_SLOT = { probe_failed:1, resume_failed:2, timeout:3, rc_nonzero:4,
-                     stuck:5, permission_denied:6, evidence_rejected:7, feishu_error:8 };  // 与 data.py 的 ERROR_ORDER 一一对应
+    const ERROR_SLOT = { probe_failed:1, resume_failed:2, timeout:3, rc_nonzero:4, stuck:5, permission_denied:6, evidence_rejected:7, feishu_error:8 };
     chart4.seriesNames = [];
     chart4.seriesArgs = [];
     chart4.hoverColors = [];
@@ -1114,34 +1272,30 @@ function renderStatsCharts() {
     chart4.tableRows = daysArr.map(d => [d]);
     
     let legHtml = [];
-    let accumulated = new Array(daysArr.length).fill(0);
-    
-    // To stack correctly with painters algorithm (drawing from back to front),
-    // we should accumulate the data. But uPlot draws series in index order: 1, 2, 3...
-    // So if series 3 is drawn last, it will be on top.
-    // Therefore, if we want series 1 at the bottom, we must draw it LAST, or draw it with a smaller height?
-    // Wait: if series 1 is bottom (0 to 5), series 2 is middle (5 to 15).
-    // If we draw series 2 (0 to 15) then series 1 (0 to 5) on top of it, series 1 will cover the bottom part of series 2.
-    // So the data arrays passed to uPlot should be:
-    // Series 1 (drawn first): total sum (0 to 15)
-    // Series 2 (drawn second): partial sum (0 to 5)
-    // This requires reversing the order of series in uPlot, but keeping the original order for the tooltip and legend!
-    
-    // We will just create dataList in reverse-accumulated order.
     let reversedEk = [...d.errors_by_kind].reverse();
     let accList = [];
+    
+    let maxTotal = 0;
+    for(let j=0; j<daysArr.length; j++) {
+       let dayTotal = d.errors_by_kind.reduce((sum, ek) => sum + ek.daily[j], 0);
+       if (dayTotal > maxTotal) maxTotal = dayTotal;
+    }
+    let minVal = Math.max(0.1, maxTotal * 0.015);
+    
     let tempAcc = new Array(daysArr.length).fill(0);
     for (let i = 0; i < reversedEk.length; i++) {
        let ek = reversedEk[i];
        let nextAcc = [...tempAcc];
        for (let j = 0; j < daysArr.length; j++) {
-          nextAcc[j] += ek.daily[j];
+          let val = ek.daily[j];
+          if (val > 0 && val < minVal) {
+             val = minVal;
+          }
+          nextAcc[j] += val;
        }
        accList.push(nextAcc);
        tempAcc = nextAcc;
     }
-    // accList[0] is the top-most partial (only top item), accList[last] is the total sum.
-    // We want the total sum to be drawn first (index 1), so we reverse accList.
     accList.reverse();
     
     d.errors_by_kind.forEach((ek, idx) => {
@@ -1149,7 +1303,7 @@ function renderStatsCharts() {
       chart4.seriesNames.push(ek.label);
       chart4.seriesArgs.push({ stroke: css('--surface'), width: 2, fill: color, points: { show: false }, paths: uPlot.paths.bars ? uPlot.paths.bars({ size: [0.6, 60], radius: BAR_RADIUS }) : null });
       chart4.hoverColors.push(color);
-      chart4.dataList.push(accList[idx].map(v => v || null)); // 0 → null,同上
+      chart4.dataList.push(accList[idx].map(v => v || null));
       chart4.tableHeads.push(ek.label);
       legHtml.push(legendKey(color, ek.label, 'rect'));
       
@@ -1158,8 +1312,6 @@ function renderStatsCharts() {
       });
     });
     chart4.legendHtml = legHtml.join('');
-    
-    // For tooltip, we need the original values, not accumulated.
     chart4.originalData = d.errors_by_kind.map(ek => ek.daily);
   }
   
@@ -1189,14 +1341,12 @@ function renderStatsCharts() {
     const box = card.querySelector('.chart-box');
     const toggleBtn = card.querySelector('.view-toggle');
     
-    // Create Table View (hidden initially)
     const tableDiv = document.createElement('div');
     tableDiv.style.display = 'none';
     tableDiv.style.overflow = 'auto';
     tableDiv.style.maxHeight = '250px';
     
     if (conf.type === 'horizontal_bar') {
-       // Chart 5 custom table
        let th1 = ['类别', '次数'];
        let tr1 = d.reply_types.map(t => [t.label, t.n]);
        let th2 = ['提问人', '次数'];
@@ -1210,14 +1360,13 @@ function renderStatsCharts() {
          <table class="ui-table">
            <thead><tr>${conf.tableHeads.map((h,i)=>`<th ${i>0?'style="text-align:right"':''}>${esc(h)}</th>`).join('')}</tr></thead>
            <tbody>
-             ${conf.tableRows.map(row => `<tr>${row.map((cell,i)=>`<td ${i>0?'style="text-align:right"':''}>${cell}</td>`).join('')}</tr>`).join('')}
+             ${conf.tableRows.map(row => `<tr>${row.map((cell,i)=>`<td ${i>0?'style="text-align:right"':''}>${esc(cell)}</td>`).join('')}</tr>`).join('')}
            </tbody>
          </table>
        `;
     }
     box.appendChild(tableDiv);
     
-    // Create Chart View
     const chartDivWrapper = document.createElement('div');
     chartDivWrapper.style.display = 'flex';
     chartDivWrapper.style.flexDirection = 'column';
@@ -1237,7 +1386,6 @@ function renderStatsCharts() {
     };
     
     if (conf.type === 'horizontal_bar') {
-      // Custom draw for chart 5 (using plain HTML bars instead of uPlot to support horizontal easy)
       let html = `<div style="display:flex; flex-direction:column; gap:8px;">`;
       let maxN = Math.max(...d.reply_types.map(t=>t.n));
       d.reply_types.forEach(t => {
@@ -1276,12 +1424,91 @@ function renderStatsCharts() {
     legendDiv.style.marginBottom = '8px';
     legendDiv.style.minHeight = '20px';
     legendDiv.style.textAlign = 'center';
-    legendDiv.innerHTML = conf.legendHtml;
+    legendDiv.innerHTML = conf.legendHtml || '<span class="ui-muted">悬停查看数据</span>';
     chartDivWrapper.appendChild(legendDiv);
     
     const innerChart = document.createElement('div');
     chartDivWrapper.appendChild(innerChart);
     
+    let xAxisValues = conf.type === 'context_line' 
+      ? (u, vals) => vals.map(v => {
+          let dt = new Date(v * 1000);
+          return `${dt.getMonth()+1}-${dt.getDate()} ${String(dt.getHours()).padStart(2,'0')}:${String(dt.getMinutes()).padStart(2,'0')}`;
+        })
+      : xLabelFmt;
+
+    let hooksConfig = {
+      setCursor: [
+        (u) => {
+          const idx = u.cursor.idx;
+          if (idx === null || idx === undefined || idx < 0 || idx >= conf.dataList[0].length) {
+            legendDiv.innerHTML = conf.legendHtml || '<span class="ui-muted">悬停查看数据</span>';
+            return;
+          }
+          if (conf.type === 'context_line') {
+            let ctx = conf.ctxData[idx];
+            let costStr = ctx.cost_usd != null ? `$${ctx.cost_usd.toFixed(2)}` : '成本未知';
+            let dTime = formatAbsoluteTime(ctx.at);
+            legendDiv.innerHTML = `卡 #${ctx.issue_id} &middot; ${dTime} &middot; 上下文 ${ctx.context_tokens >= 1000 ? (ctx.context_tokens/1000).toFixed(1) + 'k' : ctx.context_tokens} &middot; ${costStr}`;
+            return;
+          }
+          
+          let legStr = `${daysArr[idx]}`;
+          for (let i = 0; i < conf.seriesNames.length; i++) {
+            let val = conf.originalData ? conf.originalData[i][idx] : conf.dataList[i+1][idx];
+            if (val !== null && val !== undefined && (val !== 0 || !conf.originalData)) { 
+               if (conf.axes.isDollar) val = '$' + val.toFixed(2);
+               legStr += ` &middot; <span style="color:${conf.hoverColors[i]}">■</span> ${esc(conf.seriesNames[i])} <strong>${val}</strong>`;
+            }
+          }
+          legendDiv.innerHTML = legStr;
+        }
+      ]
+    };
+    
+    if (conf.type === 'context_line') {
+       hooksConfig.draw = [
+         (u) => {
+           let uCtx = u.ctx;
+           uCtx.save();
+           let cw = conf.ctxData[0] ? conf.ctxData[0].context_window : null;
+           if (cw) {
+             let yPos = u.valToPos(cw, 'y', true);
+             if (yPos >= u.bbox.top && yPos <= u.bbox.top + u.bbox.height) {
+               uCtx.beginPath();
+               uCtx.strokeStyle = css('--text-3');
+               uCtx.lineWidth = 1;
+               uCtx.moveTo(u.bbox.left, yPos);
+               uCtx.lineTo(u.bbox.left + u.bbox.width, yPos);
+               uCtx.stroke();
+               uCtx.fillStyle = css('--text-3');
+               uCtx.font = "10px sans-serif";
+               uCtx.textAlign = "right";
+               uCtx.fillText("窗口 1M", u.bbox.left + u.bbox.width - 5, yPos - 5);
+             }
+           }
+           let lastSession = null;
+           for(let i=0; i<conf.ctxData.length; i++) {
+             let sId = conf.ctxData[i].session_id;
+             if (lastSession !== null && sId !== lastSession) {
+               let xPos = u.valToPos(conf.dataList[0][i], 'x', true);
+               uCtx.beginPath();
+               uCtx.strokeStyle = css('--border');
+               uCtx.lineWidth = 1;
+               uCtx.moveTo(xPos, u.bbox.top);
+               uCtx.lineTo(xPos, u.bbox.top + u.bbox.height);
+               uCtx.stroke();
+               uCtx.fillStyle = css('--text-3');
+               uCtx.textAlign = "left";
+               uCtx.fillText("新会话", xPos + 4, u.bbox.top + 10);
+             }
+             lastSession = sId;
+           }
+           uCtx.restore();
+         }
+       ];
+    }
+
     const uPlotOpts = {
       width: card.clientWidth - 40,
       height: 200,
@@ -1291,7 +1518,7 @@ function renderStatsCharts() {
           stroke: css('--text-2'),
           grid: { stroke: css('--border-subtle'), width: 1 },
           ticks: { stroke: css('--border-subtle'), width: 1 },
-          values: xLabelFmt
+          values: xAxisValues
         },
         {
           stroke: css('--text-2'),
@@ -1307,39 +1534,18 @@ function renderStatsCharts() {
             return v >= 1000 ? (v/1000).toFixed(1) + 'k' : v;
           }),
           incrs: conf.axes.isDuration ? [30, 60, 120, 300, 600, 1200, 1800, 3600, 7200]
-               : conf.axes.isInteger ? [1,2,5,10,20,50,100,200,500,1000] : undefined
+               : conf.axes.isInteger ? [1,2,5,10,20,50,100,200,500,1000,100000,200000,400000] : undefined
         }
       ],
       scales: {
-        // 两端各留半格:否则第一天和最后一天的柱子只画出一半(2026-09-23 截图发现)
-        x: { time: false, range: (u, min, max) => [min - 0.5, max + 0.5] },
+        x: { time: false, range: (u, min, max) => conf.type === 'context_line' ? [min - (max-min)*0.05, max + (max-min)*0.05] : [min - 0.5, max + 0.5] },
         y: { range: (u, min, max) => [0, (max || 1) * 1.15] }
       },
       series: [
         {},
         ...conf.seriesArgs
       ],
-      hooks: {
-        setCursor: [
-          (u) => {
-            const idx = u.cursor.idx;
-            if (idx === null || idx === undefined || idx < 0 || idx >= daysArr.length) {
-              legendDiv.innerHTML = conf.legendHtml || '<span class="ui-muted">悬停查看数据</span>';
-              return;
-            }
-            let legStr = `${daysArr[idx]}`;
-            for (let i = 0; i < conf.seriesNames.length; i++) {
-              let val = conf.originalData ? conf.originalData[i][idx] : conf.dataList[i+1][idx];
-              if (val !== null && val !== undefined && val !== 0) { // Don't show 0 in tooltip for stacked bars is good, but let's keep it if it's not chart4 or it's not 0
-                 if (conf.originalData && val === 0) continue; // Skip 0 for stacked bar
-                 if (conf.axes.isDollar) val = '$' + val.toFixed(2);
-                 legStr += ` &middot; <span style="color:${conf.hoverColors[i]}">■</span> ${esc(conf.seriesNames[i])} <strong>${val}</strong>`;
-              }
-            }
-            legendDiv.innerHTML = legStr;
-          }
-        ]
-      }
+      hooks: hooksConfig
     };
     
     if (conf.type === 'stacked_bar') {

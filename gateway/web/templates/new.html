@@ -26,7 +26,7 @@
         {% if f.name in ['app_id', 'app_secret', 'alert_open_id', 'p2p_allow', 'group_allow', 'claude_env'] %}
         <div class="field">
           <label>{{ f.desc }} ({{ f.name }})</label>
-          <input name="{{ f.name }}" class="ui-input" required>
+          <input name="{{ f.name }}" class="ui-input"{% if f.name != 'claude_env' %} required{% endif %}{% if f.name == 'claude_env' %} placeholder="留空即用默认代理 127.0.0.1:7890"{% endif %}>
         </div>
         {% endif %}
       {% endfor %}

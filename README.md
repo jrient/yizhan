@@ -55,12 +55,14 @@ loginctl enable-linger $USER
 ## 坑:systemd 下 claude 报 403
 
 `claude` 在这台机器上要走本地代理才连得上 API,而 systemd 服务没有 shell 里的代理变量,
-探活会直接 `403 Request not allowed`,卡全堆着没人处理(2026-09-21 实测)。配置里写清楚:
+探活会直接 `403 Request not allowed`,卡全堆着没人处理(2026-09-21 实测)。
+现在代码里默认就给 claude 带上 `http://127.0.0.1:7890`(`gateway/config.py` 的 `DEFAULT_CLAUDE_ENV`),
+实例配置不用写。要换代理就在 `[claude_env]` 里写同名键覆盖,写成 `""` 就是不要这个变量:
 
 ```toml
 [claude_env]
-https_proxy = "http://127.0.0.1:7890"
-http_proxy  = "http://127.0.0.1:7890"
+https_proxy = "http://10.0.0.1:3128"   # 覆盖默认
+http_proxy  = ""                       # 不要
 ```
 
 飞书接口不走代理,客户端已经关了 `trust_env`,两边互不影响。

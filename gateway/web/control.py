@@ -102,7 +102,7 @@ FIELDS: list[tuple] = [
     ('claude_bin', 'str', 'claude 可执行文件路径', False, ''),
     ('probe_timeout_sec', 'int', '探活最多等几秒。代理慢时调大,否则会频繁报「claude 连不上」', False, ''),
     ('permission_args', 'list', 'claude 的权限参数。skip 会连 settings.json 的 deny 清单一起绕过', False, ''),
-    ('claude_env', 'table', '给 claude 补的环境变量。这台机器要 https_proxy,不给就 403', False, ''),
+    ('claude_env', 'table', '给 claude 补的环境变量。本机代理已默认带上,留空即可;要换代理写同名键覆盖,写成空串就是不要', False, ''),
 ]
 MASK = '••••'
 
@@ -291,7 +291,7 @@ def wizard_verify(inst: str, form: dict) -> dict:
                   '③ 事件与回调选「长连接」并订阅 im.message.receive_v1 ④ 创建版本发布并等管理员审核'}
     ok, msg = probe(cfg)
     out['probe'] = {'ok': ok, 'message': msg if ok else
-                    f'claude 连不上: {msg}。这台机器要走代理的话,在 claude_env 里填 https_proxy'}
+                    f'claude 连不上: {msg}。本机代理默认是 127.0.0.1:7890,代理没开或地址变了的话,在 claude_env 里覆盖 https_proxy'}
     out['ok'] = bool(oid) and ok
     return out
 

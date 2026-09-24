@@ -12,7 +12,7 @@
       </h1>
       <p class="ui-muted mt-4 mb-4" style="font-size:13px;">项目目录: <span class="ui-mono">{{ summary.project_dir }}</span></p>
     </div>
-    <div class="row">
+    <div class="row instance-header-buttons">
       <button class="ui-btn" onclick="apiAction('{{inst}}', '{{ "resume" if summary.paused else "pause" }}').then(()=>location.reload())">{{ "恢复" if summary.paused else "暂停" }}</button>
       <button class="ui-btn" onclick="apiAction('{{inst}}', 'restart-listener')">重启监听</button>
       <button class="ui-btn" onclick="apiAction('{{inst}}', 'rotate')">轮换会话</button>

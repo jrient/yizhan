@@ -8,6 +8,14 @@ from dataclasses import dataclass, field
 from .paths import Paths
 
 
+# 这台机器上 claude 必须走本地代理,否则 403 Request not allowed(2026-09-21 实测)。
+# 所有实例默认带上;实例的 [claude_env] 同名键覆盖它,写成空串就是不要这个变量。
+DEFAULT_CLAUDE_ENV = {
+    'https_proxy': 'http://127.0.0.1:7890',
+    'http_proxy': 'http://127.0.0.1:7890',
+}
+
+
 class ConfigError(Exception):
     pass
 
@@ -34,8 +42,8 @@ class Config:
     # 兜底:主会话上下文超过这么多 token 就主动轮换。0 = 关(依赖 CLI 自带的自动压缩)。
     # 09-21 的自动压缩实验没跑到 100k 阈值,结论未定,所以留这个开关。
     rotate_at_tokens: int = 0
-    # 给 claude 子进程补的环境变量。这台机器上 claude 必须走本地代理,否则报
-    # 403 Request not allowed(2026-09-21 实测);systemd 服务没有这些变量,必须显式给。
+    # 给 claude 子进程补的环境变量,叠在 DEFAULT_CLAUDE_ENV 之上(默认已带本机代理)。
+    # systemd 服务没有 shell 的代理变量,所以代理不能指望从环境继承。
     # 注意飞书接口不走代理(FeishuClient 关了 trust_env)。
     claude_env: dict = field(default_factory=dict)
     # 除原项目外还要让 claude 读得到的目录(逐个 --add-dir)。受限权限模式下,

@@ -17,6 +17,8 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from . import config as configmod
+
 log = logging.getLogger('yizhan.runner')
 
 STRIP_ENV = ('CLAUDECODE', 'CLAUDE_CODE_ENTRYPOINT', 'CLAUDE_CODE_SSE_PORT', 'CLAUDE_CODE_SESSION_ID',
@@ -48,7 +50,12 @@ def build_env(cfg, extra: dict[str, str] | None = None) -> dict[str, str]:
     env['YIZHAN_INST'] = cfg.inst
     env.setdefault('HOME', os.path.expanduser('~'))
     env['PATH'] = os.path.dirname(cfg.claude_bin) + os.pathsep + env.get('PATH', '/usr/bin:/bin')
-    env.update(getattr(cfg, 'claude_env', None) or {})
+    merged = {**configmod.DEFAULT_CLAUDE_ENV, **(getattr(cfg, 'claude_env', None) or {})}
+    for k, v in merged.items():
+        if v == '':
+            env.pop(k, None)          # 空串 = 这个实例不要这个变量
+        else:
+            env[k] = str(v)
     if extra:
         env.update(extra)
     return env

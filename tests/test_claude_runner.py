@@ -104,6 +104,24 @@ def test_claude_env_injected(fcfg, tmp_path, monkeypatch):
     assert 'CLAUDECODE' not in env
 
 
+def test_claude_env_default_proxy(fcfg, monkeypatch):
+    """实例没配 claude_env 也要带上本机代理,新实例不用每次手填(2026-09-24 要求)。"""
+    for k in ('https_proxy', 'http_proxy', 'HTTPS_PROXY', 'HTTP_PROXY'):
+        monkeypatch.delenv(k, raising=False)
+    fcfg.claude_env = {}
+    env = cr.build_env(fcfg)
+    assert env['https_proxy'] == env['http_proxy'] == 'http://127.0.0.1:7890'
+
+
+def test_claude_env_overrides_and_disables_default(fcfg, monkeypatch):
+    """实例配置覆盖默认值;写成空串就是不要这个变量。"""
+    monkeypatch.delenv('http_proxy', raising=False)
+    fcfg.claude_env = {'https_proxy': 'http://10.0.0.1:3128', 'http_proxy': ''}
+    env = cr.build_env(fcfg)
+    assert env['https_proxy'] == 'http://10.0.0.1:3128'
+    assert 'http_proxy' not in env
+
+
 def test_big_stderr_does_not_hang(fcfg, tmp_path):
     """stderr 刷 200KB+:原来没人实时读,管道写满后进程卡死,最后被当成无响应杀掉。"""
     fcfg.idle_timeout_min = 0.5

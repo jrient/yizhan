@@ -29,10 +29,12 @@
       <input type="hidden" name="csrf" value="{{ csrf }}">
     </form>
   </aside>
+  <div class="ui-sidebar-mask" onclick="document.body.classList.remove('sidebar-open')"></div>
 
   <!-- 内容 -->
   <div class="ui-content">
     <header class="ui-topbar" style="justify-content: flex-end;">
+      <button class="ui-btn mobile-menu-btn" onclick="document.body.classList.add('sidebar-open')">☰ 菜单</button>
       <div class="ui-seg" id="theme-seg">
         <button data-theme="light" onclick="setTheme('light')">浅色</button>
         <button data-theme="dark" onclick="setTheme('dark')">深色</button>

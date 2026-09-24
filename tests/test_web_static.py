@@ -90,3 +90,10 @@ def test_error_slots_match_backend_order():
     slots = dict((k.strip(), int(v)) for k, v in re.findall(r'(\w+)\s*:\s*(\d+)', m.group(1)))
     assert len(ERROR_ORDER) <= 8
     assert slots == {k: i + 1 for i, k in enumerate(ERROR_ORDER)}
+
+
+def test_no_stray_files_in_static():
+    """设计代理两次在 static/ 留下改写用的临时脚本(fix_*.py、replace_js.js),会被当静态资源公开出去。"""
+    expected = {'app.css', 'app.js', 'base.css', 'chart-tokens.css', 'htmx-ext-sse.js', 'htmx.min.js',
+                'tokens.css', 'uplot.min.css', 'uplot.min.js', 'VERSIONS.md'}
+    assert {p.name for p in STATIC.iterdir()} - expected == set()
