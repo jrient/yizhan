@@ -12,6 +12,7 @@ import sys
 import threading
 import time
 
+from .paths import unescape_inst, unit
 from . import config as configmod, db as dbm
 from .alerts import alert
 from .events import EventRow, from_api_item, from_ws_event
@@ -137,7 +138,7 @@ def trigger_dispatcher(inst: str):
     # --no-block 是必须的:dispatcher 是 oneshot,不加会一直等到它处理完整轮卡
     # (实测 2026-09-21:收到第一条消息就卡了 10 秒超时,期间收不了新事件)。
     try:
-        subprocess.run(['systemctl', '--user', '--no-block', 'start', f'yizhan-dispatcher@{inst}.service'],
+        subprocess.run(['systemctl', '--user', '--no-block', 'start', unit('dispatcher', inst)],
                        check=False, capture_output=True, timeout=10)
     except Exception as e:
         log.warning('拉起 dispatcher 失败: %s', e)
@@ -220,7 +221,8 @@ def main(argv=None) -> int:
     if not argv:
         print('用法: python -m gateway.listener <inst>', file=sys.stderr)
         return 2
-    cfg = configmod.load(argv[0])
+    # systemd 的 %i 传的是转义形式(中文名是 \xNN…),先还原
+    cfg = configmod.load(unescape_inst(argv[0]))
     cfg.paths.ensure()
     logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(name)s %(message)s')
     conn = dbm.connect(cfg.paths.db_file)

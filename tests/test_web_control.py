@@ -34,7 +34,7 @@ def test_pause_and_resume(cfg, sysctl):
 
 def test_restart_and_dispatch_now(cfg, sysctl):
     assert control.action('demo', 'restart-listener')['ok']
-    assert ['systemctl', '--user', 'restart', 'yizhan-listener@demo'] in sysctl
+    assert ['systemctl', '--user', 'restart', 'yizhan-listener@demo.service'] in sysctl
     assert control.action('demo', 'dispatch-now')['ok']
     assert ['systemctl', '--user', '--no-block', 'start', 'yizhan-dispatcher@demo.service'] in sysctl
 
@@ -196,8 +196,16 @@ def test_wizard_verify_bad_credentials(cfg, monkeypatch):
 def test_wizard_enable(cfg, sysctl):
     r = control.wizard_enable('demo')
     assert r['ok']
-    assert ['systemctl', '--user', 'enable', '--now', 'yizhan-listener@demo'] in sysctl
+    assert ['systemctl', '--user', 'enable', '--now', 'yizhan-listener@demo.service'] in sysctl
     assert ['systemctl', '--user', 'enable', '--now', 'yizhan-dispatcher@demo.timer'] in sysctl
+
+
+def test_wizard_enable_chinese_name(cfg, sysctl):
+    """中文实例名要转义成 systemd 认的服务名,不然 Invalid unit name(2026-09-24 创视助手起不来)。"""
+    control.wizard_enable('创视助手')
+    esc = r'\xe5\x88\x9b\xe8\xa7\x86\xe5\x8a\xa9\xe6\x89\x8b'
+    assert ['systemctl', '--user', 'enable', '--now', f'yizhan-listener@{esc}.service'] in sysctl
+    assert ['systemctl', '--user', 'enable', '--now', f'yizhan-dispatcher@{esc}.timer'] in sysctl
 
 
 def test_table_field_accepts_json_form(cfg):

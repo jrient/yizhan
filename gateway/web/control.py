@@ -16,7 +16,7 @@ from pathlib import Path
 from .. import cli, config as configmod, db as dbm
 from ..claude_runner import probe
 from ..feishu import FeishuClient, FeishuError
-from ..paths import Paths
+from ..paths import Paths, unit
 
 _write_lock = threading.Lock()
 ACTION_TIMEOUT = 20
@@ -45,10 +45,10 @@ def action(inst: str, name: str, **kw) -> dict:
             cli.resume(inst)
             return {'ok': True, 'message': f'{inst} 已恢复'}
         if name == 'restart-listener':
-            ok, msg = _sysctl(['restart', f'yizhan-listener@{inst}'])
+            ok, msg = _sysctl(['restart', unit('listener', inst)])
             return {'ok': ok, 'message': 'listener 已重启' if ok else f'重启失败: {msg}'}
         if name == 'dispatch-now':
-            ok, msg = _sysctl(['--no-block', 'start', f'yizhan-dispatcher@{inst}.service'])
+            ok, msg = _sysctl(['--no-block', 'start', unit('dispatcher', inst)])
             return {'ok': ok, 'message': '已叫醒 dispatcher' if ok else f'失败: {msg}'}
         if name == 'rotate':
             cfg = configmod.load(inst)
@@ -297,8 +297,8 @@ def wizard_verify(inst: str, form: dict) -> dict:
 
 
 def wizard_enable(inst: str) -> dict:
-    ok1, m1 = _sysctl(['enable', '--now', f'yizhan-listener@{inst}'])
-    ok2, m2 = _sysctl(['enable', '--now', f'yizhan-dispatcher@{inst}.timer'])
+    ok1, m1 = _sysctl(['enable', '--now', unit('listener', inst)])
+    ok2, m2 = _sysctl(['enable', '--now', unit('dispatcher', inst, 'timer')])
     if ok1 and ok2:
         return {'ok': True, 'message': f'{inst} 的 listener 与 timer 都起来了'}
     return {'ok': False, 'message': f'启用失败: {m1} {m2}'.strip()}

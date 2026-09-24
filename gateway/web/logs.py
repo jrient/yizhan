@@ -8,6 +8,7 @@ import time
 from pathlib import Path
 from typing import Iterator
 
+from ..paths import unit
 from .. import config as configmod
 
 LEVELS = {0: 'emerg', 1: 'alert', 2: 'crit', 3: 'error', 4: 'warn', 5: 'notice', 6: 'info', 7: 'debug'}
@@ -15,8 +16,8 @@ STREAMS = ('listener', 'dispatcher', 'claude')
 
 
 def unit_for(inst: str, stream: str) -> str:
-    return (f'yizhan-listener@{inst}.service' if stream == 'listener'
-            else f'yizhan-dispatcher@{inst}.service')
+    return (unit('listener', inst) if stream == 'listener'
+            else unit('dispatcher', inst))
 
 
 def parse_journal_line(line: str) -> dict | None:
@@ -169,7 +170,7 @@ def stream_events(inst: str, stream: str, since_ms: int = 0, q: str | None = Non
     else:
         yield {'at': int(time.time() * 1000), 'level': 'error',
                'text': '[读不到 journal,listener 没有文件日志。用 journalctl --user -u '
-                       f'yizhan-listener@{inst} -f 看]'}
+                       f"'{unit('listener', inst)}' -f 看]"}
 
 
 def _parse_plain(line: str) -> dict | None:

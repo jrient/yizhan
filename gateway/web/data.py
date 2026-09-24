@@ -12,7 +12,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from .. import config as configmod, db as dbm
-from ..paths import Paths
+from ..paths import Paths, unit
 
 RESERVED = {'web', 'example', 'web.example'}
 
@@ -71,7 +71,7 @@ def dispatcher_last(inst: str) -> dict:
 
     不读 alerts 表判探活:告警 1 小时内去重,而且恢复之后不会自己消掉,会一直红。
     """
-    d = _show(f'yizhan-dispatcher@{inst}.service', ['ExecMainStatus', 'ExecMainExitTimestamp', 'Result'])
+    d = _show(unit('dispatcher', inst), ['ExecMainStatus', 'ExecMainExitTimestamp', 'Result'])
     rc = d.get('ExecMainStatus')
     return {'rc': int(rc) if rc and rc.isdigit() else None,
             'at': d.get('ExecMainExitTimestamp') or None,
@@ -84,7 +84,7 @@ def timer_next(inst: str) -> str | None:
     OnUnitInactiveSec 这类相对定时器只填 NextElapseUSecMonotonic,实时字段是 0,
     所以要用开机时刻把单调时间换算回墙上时间(2026-09-21 页面显示 null 才发现)。
     """
-    d = _show(f'yizhan-dispatcher@{inst}.timer',
+    d = _show(unit('dispatcher', inst, 'timer'),
               ['NextElapseUSecRealtime', 'NextElapseUSecMonotonic'])
     us = d.get('NextElapseUSecRealtime')
     if us and us.isdigit() and us != '0':
@@ -196,9 +196,9 @@ def instance_summary(inst: str) -> dict:
         conn, db_state = None, 'broken'
     row['db_state'] = db_state
 
-    listener = unit_state(f'yizhan-listener@{inst}')
+    listener = unit_state(unit('listener', inst))
     last = dispatcher_last(inst)
-    row['units'] = {'listener': listener, 'timer': unit_state(f'yizhan-dispatcher@{inst}.timer'),
+    row['units'] = {'listener': listener, 'timer': unit_state(unit('dispatcher', inst, 'timer')),
                     'dispatcher_last': last}
 
     now = dbm.now_ms()
@@ -282,7 +282,7 @@ def overview(inst: str) -> dict:
     summary['rotate_at_tokens'] = cfg.rotate_at_tokens or None
     current = cards(inst, state='answering', size=1)['items']
     # dispatcher 正在跑时 timer 没有下次时间(OnUnitInactiveSec 要等它先停),不是故障
-    dispatcher_active = unit_state(f'yizhan-dispatcher@{inst}.service') in ('active', 'activating')
+    dispatcher_active = unit_state(unit('dispatcher', inst)) in ('active', 'activating')
     return {'inst': inst, 'hourly': hourly, 'alerts': alerts, 'card_states': states,
             'card_state_list': state_list,
             'summary': summary, 'timer_next': timer_next(inst),

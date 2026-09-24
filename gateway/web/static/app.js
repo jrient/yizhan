@@ -293,7 +293,8 @@ async function renderOverview() {
     
     let dispatchText = '';
     if (data.dispatcher_active) {
-      dispatchText = '正在处理';
+      // dispatcher 每轮先探活、再取卡;没取到卡时只是在例行检查,别说成「正在处理」
+      dispatchText = data.current_card ? `正在处理卡 #${data.current_card.id}` : '运行中,检查新卡';
     } else {
       let rc = sum.units.dispatcher_last ? sum.units.dispatcher_last.rc : -1;
       let atStr = sum.units.dispatcher_last ? sum.units.dispatcher_last.at : '';
@@ -316,16 +317,15 @@ async function renderOverview() {
     
     let ctxTokens = sum.context_tokens || 0;
     let ctxWin = sum.context_window;
-    let ctxText = Math.round(ctxTokens/1000) + 'k';
+    let ctxText = fmtTokens(ctxTokens);
     let ctxBar = '';
     if (ctxWin) {
       let pct = Math.min(100, Math.max(0, (ctxTokens / ctxWin) * 100));
       let barColor = pct >= 90 ? 'var(--danger)' : (pct >= 70 ? 'var(--warn)' : 'var(--accent)');
       ctxBar = `
-        <div class="ui-progress mt-4" style="height:4px; background:var(--surface-2); border-radius:2px; overflow:hidden">
+        <div class="ui-progress" style="margin-top:10px; height:4px; background:var(--surface-2); border-radius:2px; overflow:hidden">
           <div style="width:${pct}%; background:${barColor}; height:100%"></div>
         </div>
-        <div class="ui-muted mt-4" style="font-size:12px">/ ${Math.round(ctxWin/1000000)}M 窗口</div>
       `;
     }
     
@@ -349,7 +349,7 @@ async function renderOverview() {
         </div>
         <div class="ui-card">
           <div class="ui-muted mb-4" style="font-size:12px">上下文</div>
-          <div style="font-size:20px; font-weight:bold">${ctxText}</div>
+          <div style="font-size:14px; font-weight:500">${ctxText}${ctxWin ? ` <span class="ui-muted" style="font-size:12px; font-weight:400">/ ${fmtTokens(ctxWin)} 窗口</span>` : ''}</div>
           ${ctxBar}
         </div>
       </div>
@@ -1130,6 +1130,17 @@ async function renderStats(days = currentStatsDays) {
   } catch (e) { console.error(e); }
 }
 
+// 422000 → '422k',1000000 → '1M'
+function fmtTokens(n) {
+  if (!n) return '0';
+  return n >= 1e6 ? `${+(n / 1e6).toFixed(1)}M` : `${Math.round(n / 1000)}k`;
+}
+
+// 区间内各轮报过的最大上下文窗口(旧轮次可能没记,为 null)
+function ctxWindowOf(rows) {
+  return Math.max(0, ...(rows || []).map(r => r.context_window || 0)) || null;
+}
+
 function renderStatsCharts() {
   const container = document.getElementById('stats-charts-container');
   if (!container || !statsData) return;
@@ -1471,7 +1482,7 @@ function renderStatsCharts() {
          (u) => {
            let uCtx = u.ctx;
            uCtx.save();
-           let cw = conf.ctxData[0] ? conf.ctxData[0].context_window : null;
+           let cw = ctxWindowOf(conf.ctxData);
            if (cw) {
              let yPos = u.valToPos(cw, 'y', true);
              if (yPos >= u.bbox.top && yPos <= u.bbox.top + u.bbox.height) {
@@ -1484,7 +1495,7 @@ function renderStatsCharts() {
                uCtx.fillStyle = css('--text-3');
                uCtx.font = "10px sans-serif";
                uCtx.textAlign = "right";
-               uCtx.fillText("窗口 1M", u.bbox.left + u.bbox.width - 5, yPos - 5);
+               uCtx.fillText(`窗口 ${fmtTokens(cw)}`, u.bbox.left + u.bbox.width - 5, yPos - 5);
              }
            }
            let lastSession = null;
@@ -1534,12 +1545,13 @@ function renderStatsCharts() {
             return v >= 1000 ? (v/1000).toFixed(1) + 'k' : v;
           }),
           incrs: conf.axes.isDuration ? [30, 60, 120, 300, 600, 1200, 1800, 3600, 7200]
-               : conf.axes.isInteger ? [1,2,5,10,20,50,100,200,500,1000,100000,200000,400000] : undefined
+               : conf.axes.isInteger ? [1,2,5,10,20,50,100,200,500,1000,100000,200000,250000,500000] : undefined
         }
       ],
       scales: {
         x: { time: false, range: (u, min, max) => conf.type === 'context_line' ? [min - (max-min)*0.05, max + (max-min)*0.05] : [min - 0.5, max + 0.5] },
-        y: { range: (u, min, max) => [0, (max || 1) * 1.15] }
+        // 上下文图要看「离窗口多远」,纵轴必须把窗口上限包进来,否则那条线画在画布外
+        y: { range: (u, min, max) => [0, Math.max(max || 1, conf.type === 'context_line' ? (ctxWindowOf(conf.ctxData) || 0) : 0) * 1.15] }
       },
       series: [
         {},

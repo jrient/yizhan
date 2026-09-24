@@ -10,6 +10,7 @@ import sys
 import time
 from pathlib import Path
 
+from .paths import unescape_inst, unit
 from . import cards, claude_runner, config as configmod, db as dbm
 from .alerts import alert
 from .feishu import FeishuClient
@@ -61,7 +62,7 @@ def ensure_session(conn, reason='init') -> tuple[str, bool]:
 def restart_listener(inst: str):
     import subprocess
     try:
-        subprocess.run(['systemctl', '--user', 'restart', f'yizhan-listener@{inst}'],
+        subprocess.run(['systemctl', '--user', 'restart', unit('listener', inst)],
                        check=False, capture_output=True, timeout=20)
     except Exception as e:
         log.warning('重启 listener 失败: %s', e)
@@ -71,7 +72,7 @@ def watchdog(conn, cfg, client):
     hb = dbm.heartbeat_get(conn)
     if hb and dbm.now_ms() - hb > 10 * 60_000:
         alert(conn, client, cfg, 'listener_stale',
-              f'listener 心跳停在 {dbm.now_ms() - hb} ms 前,尝试重启 yizhan-listener@{cfg.inst}')
+              f'listener 心跳停在 {dbm.now_ms() - hb} ms 前,尝试重启 {unit("listener", cfg.inst)}')
         restart_listener(cfg.inst)
     for it in cards.stale_open(conn, dbm.now_ms(), 30):
         alert(conn, client, cfg, f"stale_open:{it['issue_id']}",
@@ -271,7 +272,8 @@ def main(argv=None) -> int:
     if not argv:
         print('用法: python -m gateway.dispatcher <inst>', file=sys.stderr)
         return 2
-    cfg = configmod.load(argv[0])
+    # systemd 的 %i 传的是转义形式(中文名是 \xNN…),先还原
+    cfg = configmod.load(unescape_inst(argv[0]))
     cfg.paths.ensure()
     logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(name)s %(message)s',
                         handlers=[logging.FileHandler(cfg.paths.logs / 'dispatcher.log'), logging.StreamHandler()])

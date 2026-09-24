@@ -55,6 +55,9 @@
 .cards-table td { white-space: nowrap; }
 .cards-table td:nth-child(2) { overflow: hidden; text-overflow: ellipsis; max-width: 0; }
 
+/* 内容区的 grid 隐式列是 auto,会被不换行的宽表格撑开;钉成 minmax(0,1fr) 让表格在自己容器里横滑 */
+.ui-content > .body { grid-template-columns: minmax(0, 1fr); }
+
 /* Mobile adjustments */
 .ui-sidebar-mask { display: none; }
 .mobile-menu-btn { display: none; margin-right: auto; }
@@ -82,6 +85,7 @@
   }
   
   .mobile-menu-btn { display: inline-flex; }
+  .ui-shell { grid-template-columns: minmax(0, 1fr); }
   
   /* Tabs */
   .ui-tabs {
@@ -93,7 +97,9 @@
   .ui-tab { white-space: nowrap; flex-shrink: 0; }
   
   /* Grid cols -> 1 col */
-  .grid-2, .grid-3, .grid-5-to-2 {
+  .grid-5-to-2 { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
+  .grid-5-to-2 > :last-child { grid-column: 1 / -1; }
+  .grid-2, .grid-3 {
     grid-template-columns: minmax(0, 1fr) !important;
   }
   

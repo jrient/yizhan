@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 
 from . import config as configmod, db as dbm
-from .paths import Paths
+from .paths import Paths, unit
 
 TEMPLATES = Path(__file__).parent / 'templates'
 # 仓库里的 skill 源(进版本库)。工作台拿到的是**完整副本**,不是软链:
@@ -124,8 +124,8 @@ def cmd_init(a) -> int:
     print(f'  库      {paths.db_file}')
     print('\n接下来:')
     print(f'  1. 编辑 {paths.config_file}(见第 4 节:飞书应用要开长连接并订阅 im.message.receive_v1)')
-    print(f'  2. systemctl --user enable --now yizhan-listener@{a.inst} yizhan-dispatcher@{a.inst}.timer')
-    print(f'  3. 把机器人拉进群,@ 一句验证;journalctl --user -u yizhan-listener@{a.inst} -f')
+    print(f"  2. systemctl --user enable --now '{unit('listener', a.inst)}' '{unit('dispatcher', a.inst, 'timer')}'")
+    print(f"  3. 把机器人拉进群,@ 一句验证;journalctl --user -u '{unit('listener', a.inst)}' -f")
     return 0
 
 
@@ -168,7 +168,7 @@ def pause(inst: str) -> str:
     cfg = configmod.load(inst)
     cfg.paths.ensure()
     cfg.paths.paused_file.write_text('paused\n')
-    subprocess.run(['systemctl', '--user', 'stop', f'yizhan-dispatcher@{inst}.timer'],
+    subprocess.run(['systemctl', '--user', 'stop', unit('dispatcher', inst, 'timer')],
                    check=False, capture_output=True, timeout=20)
     s = dbm.session_get(dbm.connect(cfg.paths.db_file))
     return s['session_id'] if s else ''
@@ -177,7 +177,7 @@ def pause(inst: str) -> str:
 def resume(inst: str):
     cfg = configmod.load(inst)
     cfg.paths.paused_file.unlink(missing_ok=True)
-    subprocess.run(['systemctl', '--user', 'start', f'yizhan-dispatcher@{inst}.timer'],
+    subprocess.run(['systemctl', '--user', 'start', unit('dispatcher', inst, 'timer')],
                    check=False, capture_output=True, timeout=20)
 
 
@@ -211,7 +211,7 @@ def cmd_status(a) -> int:
     print(f'  心跳:   {fmt(hb)}')
     counts = dict(conn.execute('SELECT state, COUNT(*) FROM issues GROUP BY state').fetchall())
     print(f'  卡:     {counts or "(空)"}')
-    for unit in (f'yizhan-listener@{a.inst}', f'yizhan-dispatcher@{a.inst}.timer'):
+    for unit in (unit('listener', a.inst), unit('dispatcher', a.inst, 'timer')):
         r = subprocess.run(['systemctl', '--user', 'is-active', unit], capture_output=True, text=True)
         print(f'  {unit}: {r.stdout.strip() or "unknown"}')
     return 0
@@ -251,7 +251,7 @@ def cmd_backfill_errors(a) -> int:
     import json as _json
     cfg = configmod.load(a.inst)
     conn = dbm.connect(cfg.paths.db_file)
-    p = subprocess.run(['journalctl', '--user', '-u', f'yizhan-dispatcher@{a.inst}.service',
+    p = subprocess.run(['journalctl', '--user', '-u', unit('dispatcher', a.inst),
                         '-o', 'json', '--no-pager'], capture_output=True, text=True)
     # 每种故障只认「一次故障恰好一行」的那种日志(2026-09-23 审查发现原来会重复计):
     #  · 探活失败:alert() 每次调用恰好打一行 alert[probe_failed](发出的 warning 或去重跳过的 info);
