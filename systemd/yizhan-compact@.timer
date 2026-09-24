@@ -1,0 +1,10 @@
+[Unit]
+Description=驿站 每小时 compact 一次 (%i)
+
+[Timer]
+OnCalendar=hourly
+Persistent=false
+Unit=yizhan-compact@%i.service
+
+[Install]
+WantedBy=timers.target

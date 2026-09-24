@@ -1,0 +1,10 @@
+[Unit]
+Description=驿站 compact (%i):给常驻会话发 /compact
+
+[Service]
+Type=oneshot
+ExecStart={repo}/.venv/bin/python -m gateway.compact %i
+Environment=TZ=Asia/Shanghai
+Environment=PYTHONUNBUFFERED=1
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+TimeoutStartSec=3600

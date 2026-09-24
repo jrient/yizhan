@@ -131,3 +131,9 @@ journalctl --user -u yizhan-listener@drama-auto -f
 
 已实测(2026-09-21):跨进程 `--resume` 能续上下文;工作台 CLAUDE.md 的改动对已 resume 的会话
 **立即生效**,改完下一张卡就按新规矩走,不用 rotate。
+
+## 每小时 compact
+
+`yizhan-compact@<inst>.timer` 每个整点给常驻会话发一次 `claude -p --resume <会话> /compact`(`gateway/compact.py`)。
+和 dispatcher 抢同一把锁:正在处理卡就等,最多等 30 分钟,拿不到就跳过这一小时;暂停中、还没有会话时不动。
+失败记进错误统计(`compact_failed`)。启用:`systemctl --user enable --now yizhan-compact@<inst>.timer`。

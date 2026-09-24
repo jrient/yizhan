@@ -140,7 +140,8 @@ def test_install_units_includes_web(inst_env, tmp_path, monkeypatch):
     cli.main(['install-units'])
     names = {p.name for p in (fake_home / '.config' / 'systemd' / 'user').glob('yizhan-*')}
     assert names == {'yizhan-listener@.service', 'yizhan-dispatcher@.service',
-                     'yizhan-dispatcher@.timer', 'yizhan-web.service'}
+                     'yizhan-dispatcher@.timer', 'yizhan-web.service',
+                     'yizhan-compact@.service', 'yizhan-compact@.timer'}
     text = (fake_home / '.config' / 'systemd' / 'user' / 'yizhan-web.service').read_text()
     assert '-m gateway.web' in text and '{repo}' not in text
 

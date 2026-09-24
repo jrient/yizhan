@@ -38,7 +38,7 @@ def unescape_inst(s: str) -> str:
 
 
 def unit(kind: str, inst: str, suffix: str = 'service') -> str:
-    """实例的 systemd 服务名。kind = listener / dispatcher;所有拼服务名的地方都走这里。"""
+    """实例的 systemd 服务名。kind = listener / dispatcher / compact;所有拼服务名的地方都走这里。"""
     return f'yizhan-{kind}@{escape_inst(inst)}.{suffix}'
 
 

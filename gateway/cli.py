@@ -212,9 +212,9 @@ def cmd_status(a) -> int:
     print(f'  心跳:   {fmt(hb)}')
     counts = dict(conn.execute('SELECT state, COUNT(*) FROM issues GROUP BY state').fetchall())
     print(f'  卡:     {counts or "(空)"}')
-    for unit in (unit('listener', a.inst), unit('dispatcher', a.inst, 'timer')):
-        r = subprocess.run(['systemctl', '--user', 'is-active', unit], capture_output=True, text=True)
-        print(f'  {unit}: {r.stdout.strip() or "unknown"}')
+    for u in (unit('listener', a.inst), unit('dispatcher', a.inst, 'timer'), unit('compact', a.inst, 'timer')):
+        r = subprocess.run(['systemctl', '--user', 'is-active', u], capture_output=True, text=True)
+        print(f'  {u}: {r.stdout.strip() or "unknown"}')
     return 0
 
 
