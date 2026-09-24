@@ -282,3 +282,25 @@ def test_attachment_falls_back_to_png(cfg):
     (cfg.paths.attachments / 'img_k1.png').write_bytes(b'png')
     assert data.attachment_path('demo', 'img_k1').name == 'img_k1.png'
     assert data.attachment_path('demo', 'img_k1').exists()
+
+
+def test_perm_denied_alert_is_labelled_with_card():
+    assert data.alert_label('perm_denied:18') == '卡 #18 权限拒绝'
+
+
+def test_overview_now_fields(cfg, db):
+    now = dbm.now_ms()
+    ev(db, 'om_1', now - 120_000)
+    cardsmod.assign_cards(db, cfg, now - 110_000)
+    iid = db.execute('SELECT issue_id FROM issues').fetchone()[0]
+    db.execute("INSERT INTO replies(issue_id,my_message_id,sent_at) VALUES(?,?,?)", (iid, 'om_r', now - 60_000))
+    dbm.insert_round(db, issue_id=iid, session_id='s', started_at=now - 100_000, ended_at=now,
+                     rc=0, context_tokens=400_000, output_tokens=1, cost_usd=0.1, outcome='answered',
+                     context_window=1_000_000)
+    o = data.overview('demo')
+    assert [c['id'] for c in o['recent_cards']] == [iid]
+    assert o['current_card'] is None and o['stuck_cards'] == []
+    assert o['summary']['context_window'] == 1_000_000
+    assert o['summary']['today_first_reply_p50_s'] is not None
+    db.execute("UPDATE issues SET state='answering'")
+    assert data.overview('demo')['current_card']['id'] == iid

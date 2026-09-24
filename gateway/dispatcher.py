@@ -105,7 +105,8 @@ def process_card(conn, cfg, client, it) -> str:
     def _round(outcome):
         dbm.insert_round(conn, issue_id=iid, session_id=sid, started_at=started, ended_at=dbm.now_ms(),
                          rc=res.rc, context_tokens=res.context_tokens, output_tokens=out_tokens,
-                         cost_usd=cost, cost_cum_usd=cum or None, outcome=outcome)
+                         cost_usd=cost, cost_cum_usd=cum or None, outcome=outcome,
+                         context_window=claude_runner.context_window(res.result))
 
     if res.idle_killed:
         dbm.record_error(conn, 'idle_killed', f'{cfg.idle_timeout_min} 分钟无输出', iid)

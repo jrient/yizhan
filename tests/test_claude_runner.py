@@ -132,3 +132,10 @@ def test_extra_dirs_become_add_dir(fcfg):
     argv = cr.build_argv(fcfg, 'p', 'sid', True)
     i = [k for k, a in enumerate(argv) if a == '--add-dir']
     assert [argv[k + 1] for k in i] == [fcfg.project_dir, '/data/QTS/成片', os.path.expanduser('~/x')]
+
+
+def test_context_window_takes_largest_model():
+    r = {'modelUsage': {'claude-opus-5[1m]': {'contextWindow': 1000000},
+                        'claude-haiku-4-5': {'contextWindow': 200000}}}
+    assert cr.context_window(r) == 1000000
+    assert cr.context_window({}) is None and cr.context_window(None) is None

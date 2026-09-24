@@ -102,6 +102,7 @@ CREATE TABLE IF NOT EXISTS rounds (
   output_tokens  INTEGER,
   cost_usd       REAL,         -- 本轮增量(API 折算价)
   cost_cum_usd   REAL,         -- CLI 报的会话累计值,算增量用
+  context_window INTEGER,      -- 模型上下文窗口(result.modelUsage.contextWindow)
   outcome        TEXT          -- answered/waiting/open/stuck/rotated
 );
 CREATE INDEX IF NOT EXISTS ix_rounds_issue ON rounds(issue_id);
@@ -150,6 +151,8 @@ def _migrate(conn):
     rcols = {r[1] for r in conn.execute('PRAGMA table_info(rounds)')}
     if rcols and 'cost_cum_usd' not in rcols:
         conn.execute('ALTER TABLE rounds ADD COLUMN cost_cum_usd REAL')
+    if rcols and 'context_window' not in rcols:
+        conn.execute('ALTER TABLE rounds ADD COLUMN context_window INTEGER')
 
 
 def connect(path: str | Path) -> sqlite3.Connection:
@@ -304,16 +307,16 @@ def session_cost_cum(conn, session_id: str) -> float | None:
 
 
 def insert_round(conn, *, issue_id, session_id, started_at, ended_at, rc, context_tokens,
-                 output_tokens, cost_usd, outcome, cost_cum_usd=None):
+                 output_tokens, cost_usd, outcome, cost_cum_usd=None, context_window=None):
     """一轮 claude 的账。页面的成本与会话曲线读这张表。
 
     claude-stream.jsonl 里有 token 与 total_cost_usd,但没有卡号,对不上卡;
     session 表只留当前与上一个 id,没有完整轮换史。所以两样都在这里落库(2026-09-21)。
     """
     conn.execute('INSERT INTO rounds(issue_id,session_id,started_at,ended_at,rc,context_tokens,'
-                 'output_tokens,cost_usd,cost_cum_usd,outcome) VALUES(?,?,?,?,?,?,?,?,?,?)',
+                 'output_tokens,cost_usd,cost_cum_usd,outcome,context_window) VALUES(?,?,?,?,?,?,?,?,?,?,?)',
                  (issue_id, session_id, started_at, ended_at, rc, context_tokens, output_tokens,
-                  cost_usd, cost_cum_usd, outcome))
+                  cost_usd, cost_cum_usd, outcome, context_window))
 
 
 def rounds(conn, limit: int = 200) -> list[sqlite3.Row]:

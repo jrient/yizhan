@@ -117,6 +117,7 @@ _ALERT_LABELS = {
     'stale_open': '长时间未处理',
     'defer_exhausted': '挂起次数用完',
     'ws_missed': '长连接漏消息',
+    'perm_denied': '权限拒绝',
 }
 RECENT_ALERT_MS = 24 * 3600_000       # 卡片墙只挂 24 小时内的告警,旧的不再红着误导人
 
@@ -129,7 +130,7 @@ def alert_label(kind: str) -> str:
     """'stuck:12' → '卡 #12 卡死';'new_chat:oc_x' → '机器人进了新群'。"""
     base, _, arg = (kind or '').partition(':')
     label = _ALERT_LABELS.get(base, base or '未知告警')
-    if arg and base in ('stuck', 'stale_open', 'defer_exhausted'):
+    if arg and base in ('stuck', 'stale_open', 'defer_exhausted', 'perm_denied'):
         return f'卡 #{arg} {label}'
     return label
 
@@ -268,13 +269,26 @@ def overview(inst: str) -> dict:
     alerts = [_alert_row(r) for r in conn.execute('SELECT * FROM alerts ORDER BY sent_at DESC LIMIT 10')]
     states = dict(conn.execute('SELECT state,COUNT(*) FROM issues GROUP BY state').fetchall())
     state_list = [{'state': k, 'label': state_label(k), 'n': v} for k, v in states.items()]
+    # 上下文水位的分母:最近一轮 claude 报的窗口(旧轮次没记,为 None 时页面只显示数字)
+    win = conn.execute('SELECT context_window FROM rounds WHERE context_window IS NOT NULL '
+                       'ORDER BY started_at DESC LIMIT 1').fetchone()
+    firsts = sorted(r[0] for r in conn.execute(
+        'SELECT (MIN(r.sent_at) - i.created_at) / 1000.0 FROM issues i JOIN replies r ON r.issue_id=i.issue_id '
+        'WHERE i.created_at>=? GROUP BY i.issue_id', (t0,)))
     summary = instance_summary(inst)
     conn.close()
+    summary['today_first_reply_p50_s'] = _pct(firsts, 0.5)
+    summary['context_window'] = int(win[0]) if win else None
+    summary['rotate_at_tokens'] = cfg.rotate_at_tokens or None
+    current = cards(inst, state='answering', size=1)['items']
     # dispatcher 正在跑时 timer 没有下次时间(OnUnitInactiveSec 要等它先停),不是故障
     dispatcher_active = unit_state(f'yizhan-dispatcher@{inst}.service') in ('active', 'activating')
     return {'inst': inst, 'hourly': hourly, 'alerts': alerts, 'card_states': states,
             'card_state_list': state_list,
             'summary': summary, 'timer_next': timer_next(inst),
+            'recent_cards': cards(inst, size=5)['items'],
+            'current_card': current[0] if current else None,
+            'stuck_cards': cards(inst, state='stuck', size=5)['items'],
             'dispatcher_active': dispatcher_active,
             'quiet_seconds': cfg.quiet_seconds, 'skill': cfg.skill}
 
@@ -472,7 +486,8 @@ def stats(inst: str, days: int = 7) -> dict:
         senders.append({'name': '其他', 'n': rest})
 
     context = [{'at': r['started_at'], 'issue_id': r['issue_id'], 'context_tokens': r['context_tokens'],
-                'cost_usd': r['cost_usd'], 'duration_s': round((r['ended_at'] - r['started_at']) / 1000)}
+                'cost_usd': r['cost_usd'], 'duration_s': round((r['ended_at'] - r['started_at']) / 1000),
+                'context_window': r['context_window'], 'session_id': r['session_id']}
                for r in conn.execute('SELECT * FROM rounds WHERE started_at>=? ORDER BY started_at', (t0,))]
 
     first_round = conn.execute('SELECT MIN(started_at) FROM rounds').fetchone()[0]

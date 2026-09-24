@@ -176,6 +176,17 @@ def context_tokens(lines: list[dict]) -> int:
     return best
 
 
+def context_window(result: dict | None) -> int | None:
+    """模型的上下文窗口有多大(result.modelUsage 里每个模型各报一个)。
+
+    取最大的:主模型窗口最大,子代理可能用小模型。页面拿它当上下文水位的分母,
+    不写死 1M——模型或窗口一换,分母跟着变。
+    """
+    wins = [int(m.get('contextWindow') or 0) for m in ((result or {}).get('modelUsage') or {}).values()
+            if isinstance(m, dict)]
+    return max(wins) if wins and max(wins) > 0 else None
+
+
 def _pump(stream, q: queue.Queue, tag: str):
     """一个读线程:逐行读到 EOF,每行放进队列,最后放一个 None 表示这条流结束。"""
     try:
