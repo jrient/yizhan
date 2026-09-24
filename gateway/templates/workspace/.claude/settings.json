@@ -26,7 +26,9 @@
       "Bash(docker:*)",
       "Write(//data/projects/**)", "Edit(//data/projects/**)",
       "Write(//data/QTS/**)", "Edit(//data/QTS/**)",
-      "Read(**/.credentials.json)", "Read(/{project_dir}/.env)", "Read(/{project_dir}/.env.*)"
+      "Read(**/.credentials.json)", "Read(/{project_dir}/.env)", "Read(/{project_dir}/.env.*)",
+      "Read(//data/projects/**/.env)", "Read(//data/projects/**/.env.*)", "Read(//data/projects/yizhan/config/**)",
+      "Read(//home/hongshu/.ssh/**)", "Read(//home/hongshu/.claude/skills/*/.env)"
     ]
   }
 }
