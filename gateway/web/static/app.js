@@ -532,7 +532,7 @@ async function renderOverview() {
           {},
           {
             label: "消息",
-            stroke: css('--bg'),
+            stroke: css('--surface'),
             width: 2,
             fill: css('--series-1'),
             points: { show: false },
@@ -540,7 +540,7 @@ async function renderOverview() {
           },
           {
             label: "卡",
-            stroke: css('--bg'),
+            stroke: css('--surface'),
             width: 2,
             fill: css('--series-2'),
             points: { show: false },
@@ -556,12 +556,12 @@ async function renderOverview() {
                 return;
               }
               let d = new Date(x[idx] * 1000);
-              legendDiv.innerHTML = `${d.getHours()}:00 &middot; 消息 <strong style="color:${css('--series-1')}">${msgs[idx]}</strong> &middot; 卡 <strong style="color:${css('--series-2')}">${cards[idx]}</strong>`;
+              legendDiv.innerHTML = `${d.getHours()}:00 &middot; <strong>${msgs[idx]}</strong> 消息 &middot; <strong>${cards[idx]}</strong> 卡`;
             }
           ]
         }
       };
-      overviewChartInst = new uPlot(opts, [x, msgs, cards], chartDiv);
+      overviewChartInst = new uPlot(opts, [x, msgs.map(v => v || null), cards.map(v => v || null)], chartDiv);   // 0 → null:零高度柱会描成短横
     };
 
     if (window.drawOverviewChart) window.drawOverviewChart(data);
@@ -1542,7 +1542,7 @@ function renderStatsCharts() {
               const m = Math.floor(v / 60), sec = Math.round(v % 60);
               return m ? (sec ? `${m}分${sec}秒` : `${m}分`) : `${sec}秒`;
             }
-            return v >= 1000 ? (v/1000).toFixed(1) + 'k' : v;
+            return v >= 1000 ? fmtTokens(v) : v;
           }),
           incrs: conf.axes.isDuration ? [30, 60, 120, 300, 600, 1200, 1800, 3600, 7200]
                : conf.axes.isInteger ? [1,2,5,10,20,50,100,200,500,1000,100000,200000,250000,500000] : undefined
