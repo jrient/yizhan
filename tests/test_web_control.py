@@ -280,3 +280,13 @@ def test_reopen_clears_defer_count(cfg, sysctl):
     conn = dbm.connect(cfg.paths.db_file)
     it = dbm.get_issue(conn, iid)
     assert it['defer_count'] == 0 and it['woke_from_defer'] == 0 and it['state'] == 'open'
+
+
+def test_config_write_work_hours(cfg):
+    """工作时段写错不落盘;写对了能读回。"""
+    from gateway import config as configmod
+    bad = control.config_write('demo', {'work_hours': '6-24'})
+    assert not bad['ok']
+    assert configmod.load('demo').work_hours == ''          # 原值不动
+    ok = control.config_write('demo', {'work_hours': '08:00-22:00'})
+    assert ok['ok'] and configmod.load('demo').work_hours == '08:00-22:00'

@@ -189,6 +189,8 @@ def instance_summary(inst: str) -> dict:
         return {**row, 'health': 'grey', 'health_reason': f'配置有问题: {e}', 'db_state': 'missing'}
     row['project_dir'] = cfg.project_dir
     row['paused'] = cfg.paths.paused_file.exists()
+    row['work_hours'] = cfg.work_hours
+    row['off_hours'] = not configmod.in_work_hours(cfg.work_hours)
     try:
         conn = open_ro(cfg.paths.db_file)
         db_state = 'ok' if conn else 'missing'

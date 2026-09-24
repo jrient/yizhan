@@ -24,6 +24,10 @@ hard_timeout_min = 60
 permission_args = ["--dangerously-skip-permissions"]
 rotate_at_tokens = 0      # >0 时上下文超过这么多 token 就主动换新会话(兜底,默认依赖自动压缩)
 
+# 工作时段(北京时间)。默认 06:00-24:00,可跨午夜如 "22:00-06:00",写 "" 表示全天。
+# 时段外照常收消息建卡,只是不派单;到点不打断正在处理的卡。
+# work_hours = "06:00-24:00"
+
 # 回复是否开话题。true:追问天然并进同一张卡;false:平铺回复,靠(会话,发起人)+10 分钟窗口归并
 reply_in_thread = true
 

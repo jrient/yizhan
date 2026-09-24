@@ -334,3 +334,26 @@ def test_denied_but_bot_finished_itself(dcfg, tmp_path, monkeypatch):
     conn = dbm.connect(dcfg.paths.db_file)
     assert dbm.get_issue(conn, 1)['state'] == 'answered' and c.replies == []
     assert conn.execute("SELECT COUNT(*) FROM errors WHERE kind='permission_denied'").fetchone()[0] == 1
+
+
+def test_off_hours_takes_no_card(dcfg, monkeypatch):
+    """非工作时间不派单、不探活;卡留着等开工(2026-09-24 需求:只在 6-24 点工作)。"""
+    dcfg.work_hours = '06:00-24:00'
+    monkeypatch.setattr(dispatcher, 'in_work_hours', lambda spec, now=None: False)
+    probes = []
+    monkeypatch.setattr(dispatcher.claude_runner, 'probe', lambda cfg: probes.append(1) or (True, 'ok'))
+    conn = dbm.connect(dcfg.paths.db_file); seed(conn, dcfg); conn.close()
+    assert dispatcher.run_once(dcfg, client=FakeClient(), max_wait_sec=0) == 0
+    assert probes == []
+    conn = dbm.connect(dcfg.paths.db_file)
+    cards.assign_cards(conn, dcfg, dbm.now_ms())
+    assert conn.execute("SELECT COUNT(*) FROM issues WHERE state='open'").fetchone()[0] == 1
+    conn.close()
+
+
+def test_off_hours_still_runs_watchdog(dcfg, monkeypatch):
+    monkeypatch.setattr(dispatcher, 'in_work_hours', lambda spec, now=None: False)
+    ran = []
+    monkeypatch.setattr(dispatcher, 'watchdog', lambda *a: ran.append(1))
+    dispatcher.run_once(dcfg, client=FakeClient(), max_wait_sec=0)
+    assert ran == [1]

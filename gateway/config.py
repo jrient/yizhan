@@ -2,8 +2,11 @@
 from __future__ import annotations
 
 import os
+import re
 import tomllib
 from dataclasses import dataclass, field
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from .paths import Paths
 
@@ -14,6 +17,41 @@ DEFAULT_CLAUDE_ENV = {
     'https_proxy': 'http://127.0.0.1:7890',
     'http_proxy': 'http://127.0.0.1:7890',
 }
+
+
+# 实例只在这个时段内派单(2026-09-24 需求)。北京时间,支持跨午夜(如 22:00-06:00),
+# 结束可写 24:00;实例配置 work_hours 覆盖,写成 "" 表示全天。
+# 非工作时间 listener 照常收消息建卡,只是 dispatcher 不开新卡,开工后按顺序处理。
+DEFAULT_WORK_HOURS = '06:00-24:00'
+TZ = ZoneInfo('Asia/Shanghai')
+_HM = re.compile(r'^(\d{2}):(\d{2})-(\d{2}):(\d{2})$')
+
+
+def parse_work_hours(spec: str) -> tuple[int, int] | None:
+    """'06:00-24:00' → (360, 1440) 分钟。空串 → None(全天)。格式不对抛 ValueError。"""
+    spec = (spec or '').strip()
+    if not spec:
+        return None
+    m = _HM.match(spec)
+    if not m:
+        raise ValueError(f'工作时间要写成 HH:MM-HH:MM,如 06:00-24:00,收到 {spec!r}')
+    h1, m1, h2, m2 = map(int, m.groups())
+    start, end = h1 * 60 + m1, h2 * 60 + m2
+    if h1 > 23 or m1 > 59 or m2 > 59 or end > 1440 or start == end:
+        raise ValueError(f'工作时间不合法: {spec!r}(小时 00-24、分钟 00-59,起止不能相同)')
+    return start, end
+
+
+def in_work_hours(spec: str, now: datetime | None = None) -> bool:
+    rng = parse_work_hours(spec)
+    if rng is None:
+        return True
+    now = (now or datetime.now(TZ)).astimezone(TZ)
+    cur = now.hour * 60 + now.minute
+    start, end = rng
+    if start < end:
+        return start <= cur < end
+    return cur >= start or cur < end          # 跨午夜
 
 
 class ConfigError(Exception):
@@ -51,6 +89,8 @@ class Config:
     extra_dirs: list = field(default_factory=list)
     # 回复是否开话题。开=追问天然并进同一张卡;关=靠(会话,发起人)+10 分钟窗口归并。
     reply_in_thread: bool = True
+    # 工作时段,见 DEFAULT_WORK_HOURS
+    work_hours: str = DEFAULT_WORK_HOURS
     paths: Paths = field(default=None, repr=False)  # type: ignore[assignment]
 
     REQUIRED = ('app_id', 'app_secret', 'project_dir')
@@ -82,4 +122,8 @@ def load_file(inst: str, path) -> Config:
     cfg = Config(inst=inst, paths=paths, **known)
     cfg.claude_bin = os.path.expanduser(cfg.claude_bin)
     cfg.project_dir = os.path.expanduser(cfg.project_dir)
+    try:
+        parse_work_hours(cfg.work_hours)
+    except ValueError as e:
+        raise ConfigError(f'{path} 的 work_hours: {e}') from e
     return cfg

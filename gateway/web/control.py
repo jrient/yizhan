@@ -49,7 +49,9 @@ def action(inst: str, name: str, **kw) -> dict:
             return {'ok': ok, 'message': 'listener 已重启' if ok else f'重启失败: {msg}'}
         if name == 'dispatch-now':
             ok, msg = _sysctl(['--no-block', 'start', unit('dispatcher', inst)])
-            return {'ok': ok, 'message': '已叫醒 dispatcher' if ok else f'失败: {msg}'}
+            cfg = configmod.load(inst)
+            note = '' if configmod.in_work_hours(cfg.work_hours) else f';现在是非工作时间({cfg.work_hours}),本轮不会派单'
+            return {'ok': ok, 'message': ('已叫醒 dispatcher' + note) if ok else f'失败: {msg}'}
         if name == 'rotate':
             cfg = configmod.load(inst)
             conn = dbm.connect(cfg.paths.db_file)
@@ -97,6 +99,7 @@ FIELDS: list[tuple] = [
     ('idle_timeout_min', 'int', 'claude 多久没输出算卡死,杀掉重来', False, ''),
     ('hard_timeout_min', 'int', '一轮最长跑多久', False, ''),
     ('rotate_at_tokens', 'int', '上下文超过多少 token 就主动换新会话。0 = 关,靠自动压缩', False, ''),
+    ('work_hours', 'str', '工作时段(北京时间),如 06:00-24:00,可跨午夜如 22:00-06:00。时段外照常收消息但不派单,开工后按顺序处理。留空=全天', False, ''),
     ('reply_in_thread', 'bool', '回复开不开话题。开=追问自动并进同一张卡;关=靠时间窗归并', False, ''),
     ('extra_dirs', 'list', '除项目目录外还要让机器人读得到的目录,每行一个(如成片所在的 NFS)。受限权限下目录外一律读不到', False, ''),
     ('claude_bin', 'str', 'claude 可执行文件路径', False, ''),

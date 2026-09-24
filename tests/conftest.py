@@ -21,6 +21,7 @@ alert_open_id = "ou_admin"
 p2p_allow = ["ou_boss", "ou_admin"]
 group_allow = ["oc_group1"]
 quiet_seconds = 30
+work_hours = ""          # 测试里全天工作,免得凌晨跑测试时莫名不派单
 ''')
     from gateway import config
     c = config.load('demo')

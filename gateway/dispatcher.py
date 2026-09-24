@@ -10,6 +10,7 @@ import sys
 import time
 from pathlib import Path
 
+from .config import in_work_hours
 from .paths import unescape_inst, unit
 from . import cards, claude_runner, config as configmod, db as dbm
 from .alerts import alert
@@ -239,6 +240,10 @@ def run_once(cfg, *, client=None, max_cards: int = 20, max_wait_sec: float = 90,
     # 开始处理的卡必须来得及跑完:剩余时间不够一张卡的最长时限,就把剩下的交给下一轮
     deadline = t_start + unit_timeout_s - cfg.hard_timeout_min * 60 - RUN_MARGIN_S
     for _ in range(max_cards):
+        if not in_work_hours(cfg.work_hours):
+            # 到点只是不开新卡;正在跑的卡在上一步已经跑完。消息照收,开工后按顺序处理
+            log.info('非工作时间(%s),不派单', cfg.work_hours)
+            break
         if handled and time.time() > deadline:
             log.info('本轮已用 %.0f 秒,剩余时间不够再跑一张卡,留给下一轮', time.time() - t_start)
             break
