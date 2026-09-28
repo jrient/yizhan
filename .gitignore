@@ -11,3 +11,6 @@ config/*.toml
 !config/example.toml
 !config/web.example.toml
 .superpowers/
+
+# 各项目专属 skill 含内网地址与人员信息,不进公开仓库
+skills/drama-auto-*/
