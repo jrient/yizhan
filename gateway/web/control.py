@@ -99,6 +99,7 @@ FIELDS: list[tuple] = [
     ('idle_timeout_min', 'int', 'claude 多久没输出算卡死,杀掉重来', False, ''),
     ('hard_timeout_min', 'int', '一轮最长跑多久', False, ''),
     ('rotate_at_tokens', 'int', '上下文超过多少 token 就主动换新会话。0 = 关,靠自动压缩', False, ''),
+    ('compact_at_tokens', 'int', '每小时 compact 的门槛:上下文超过多少 token 才压缩。0 = 每次都压', False, ''),
     ('work_hours', 'str', '工作时段(北京时间),如 06:00-24:00,可跨午夜如 22:00-06:00。时段外照常收消息但不派单,开工后按顺序处理。留空=全天', False, ''),
     ('reply_in_thread', 'bool', '回复开不开话题。开=追问自动并进同一张卡;关=靠时间窗归并', False, ''),
     ('extra_dirs', 'list', '除项目目录外还要让机器人读得到的目录,每行一个(如成片所在的 NFS)。受限权限下目录外一律读不到', False, ''),

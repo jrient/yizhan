@@ -89,7 +89,8 @@ CREATE TABLE IF NOT EXISTS session (
   reason      TEXT,
   prev_id     TEXT,
   usage       TEXT,
-  fresh       INTEGER DEFAULT 1     -- 1 = 还没跑过第一轮(不能 --resume)
+  fresh       INTEGER DEFAULT 1,    -- 1 = 还没跑过第一轮(不能 --resume)
+  ctx_tokens  INTEGER               -- 当前上下文大小:每轮结束、每次 compact 后更新
 );
 CREATE TABLE IF NOT EXISTS rounds (
   round_id       INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -148,6 +149,9 @@ def _migrate(conn):
     acols = {r[1] for r in conn.execute('PRAGMA table_info(alerts)')}
     if acols and 'text' not in acols:
         conn.execute('ALTER TABLE alerts ADD COLUMN text TEXT')
+    scols = {r[1] for r in conn.execute('PRAGMA table_info(session)')}
+    if scols and 'ctx_tokens' not in scols:
+        conn.execute('ALTER TABLE session ADD COLUMN ctx_tokens INTEGER')
     rcols = {r[1] for r in conn.execute('PRAGMA table_info(rounds)')}
     if rcols and 'cost_cum_usd' not in rcols:
         conn.execute('ALTER TABLE rounds ADD COLUMN cost_cum_usd REAL')
@@ -268,7 +272,7 @@ def session_rotate(conn, reason: str) -> str:
     t = now_ms()
     conn.execute('INSERT INTO session(id,session_id,created_at,reason,prev_id,fresh) VALUES(1,?,?,?,?,1) '
                  'ON CONFLICT(id) DO UPDATE SET session_id=excluded.session_id, created_at=excluded.created_at, '
-                 'reason=excluded.reason, prev_id=excluded.prev_id, fresh=1, usage=NULL',
+                 'reason=excluded.reason, prev_id=excluded.prev_id, fresh=1, usage=NULL, ctx_tokens=NULL',
                  (sid, t, reason, prev['session_id'] if prev else None))
     if prev:
         conn.execute('UPDATE session_history SET ended_at=? WHERE session_id=? AND ended_at IS NULL',
@@ -289,6 +293,11 @@ def session_mark_used(conn, usage: dict | None = None, sid: str | None = None) -
     if sid is not None:
         q += ' AND session_id=?'; args.append(sid)
     return conn.execute(q, args).rowcount > 0
+
+
+def session_set_ctx(conn, sid: str, tokens: int) -> None:
+    """记下会话当前上下文多大;会话已被轮换走就不动。"""
+    conn.execute('UPDATE session SET ctx_tokens=? WHERE id=1 AND session_id=?', (tokens, sid))
 
 
 def session_rotate_if(conn, expected_sid: str, reason: str) -> str | None:

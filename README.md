@@ -136,4 +136,6 @@ journalctl --user -u yizhan-listener@drama-auto -f
 
 `yizhan-compact@<inst>.timer` 每个整点给常驻会话发一次 `claude -p --resume <会话> /compact`(`gateway/compact.py`)。
 和 dispatcher 抢同一把锁:正在处理卡就等,最多等 30 分钟,拿不到就跳过这一小时;暂停中、还没有会话时不动。
-失败记进错误统计(`compact_failed`)。启用:`systemctl --user enable --now yizhan-compact@<inst>.timer`。
+上下文没到 `compact_at_tokens`(默认 300000,0 = 每次都压)也不动,大小取自上一轮结束时记下的值。
+`claude -p /compact` 不管压没压成都报 success,所以结果从流里的 `compact_result` 判断:
+「Not enough messages」算 noop,其它失败记进错误统计(`compact_failed`)。启用:`systemctl --user enable --now yizhan-compact@<inst>.timer`。

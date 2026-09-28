@@ -115,6 +115,14 @@ def test_threshold_rotate(dcfg):
     assert any('上下文' in t for t in c.texts)
 
 
+def test_round_records_session_context_size(dcfg):
+    conn = dbm.connect(dcfg.paths.db_file); seed(conn, dcfg)
+    sid = dbm.session_rotate(conn, 'init'); dbm.session_mark_used(conn); conn.close()
+    dispatcher.run_once(dcfg, client=FakeClient(), max_cards=1)
+    s = dbm.session_get(dbm.connect(dcfg.paths.db_file))
+    assert s['session_id'] == sid and s['ctx_tokens'] == 40     # 给 compact 判门槛用
+
+
 def test_waits_out_quiet_window_instead_of_exiting(dcfg, monkeypatch):
     """消息刚到就被唤起时,只差静默窗应该等,不能空转退出等 timer 再来。"""
     conn = dbm.connect(dcfg.paths.db_file)

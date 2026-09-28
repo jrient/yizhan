@@ -129,6 +129,7 @@ def process_card(conn, cfg, client, it) -> str:
     ctx_tokens = res.context_tokens
     if ctx_tokens:
         log.info('主会话上下文 %d tokens', ctx_tokens)
+        dbm.session_set_ctx(conn, sid, ctx_tokens)
     if cfg.rotate_at_tokens and ctx_tokens >= cfg.rotate_at_tokens:
         new_sid = dbm.session_rotate_if(conn, sid, f'usage {ctx_tokens} >= {cfg.rotate_at_tokens}')
         if new_sid:

@@ -80,6 +80,8 @@ class Config:
     # 兜底:主会话上下文超过这么多 token 就主动轮换。0 = 关(依赖 CLI 自带的自动压缩)。
     # 09-21 的自动压缩实验没跑到 100k 阈值,结论未定,所以留这个开关。
     rotate_at_tokens: int = 0
+    # 定时 compact 的门槛:上一轮上下文超过这么多 token 才压缩,小会话压了反而变大还丢细节。0 = 每次都压。
+    compact_at_tokens: int = 300_000
     # 给 claude 子进程补的环境变量,叠在 DEFAULT_CLAUDE_ENV 之上(默认已带本机代理)。
     # systemd 服务没有 shell 的代理变量,所以代理不能指望从环境继承。
     # 注意飞书接口不走代理(FeishuClient 关了 trust_env)。

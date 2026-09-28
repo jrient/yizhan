@@ -39,6 +39,22 @@ if mode == 'denied':
                       'permission_denials': [{'tool_name': 'Bash', 'tool_use_id': 't1',
                                               'tool_input': {'command': 'python3 - <<EOF'}}]}), flush=True)
     sys.exit(0)
+if mode.startswith('compact_'):
+    # /compact:result 恒报 success,真实结果在 system/status 里
+    kind = mode[len('compact_'):]
+    print(json.dumps({'type': 'system', 'subtype': 'status', 'status': 'compacting'}), flush=True)
+    if kind == 'ok':
+        print(json.dumps({'type': 'system', 'subtype': 'compact_boundary',
+                          'compact_metadata': {'trigger': 'manual', 'pre_tokens': 400000, 'post_tokens': 9000}}), flush=True)
+        st = {'compact_result': 'success'}
+    elif kind == 'noop':
+        st = {'compact_result': 'failed', 'compact_error': 'Not enough messages to compact.'}
+    else:
+        st = {'compact_result': 'failed', 'compact_error': 'API Error: overloaded'}
+    print(json.dumps({'type': 'system', 'subtype': 'status', 'status': None, **st}), flush=True)
+    print(json.dumps({'type': 'result', 'subtype': 'success', 'is_error': False,
+                      'result': st.get('compact_error', ''), 'usage': {'output_tokens': 0}}), flush=True)
+    sys.exit(0)
 if mode == 'crash':
     sys.stderr.write('boom\n'); sys.exit(2)
 
